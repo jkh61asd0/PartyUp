@@ -1,6 +1,16 @@
 const STORAGE_KEY = "partyup-state-v3";
-const SHARED_API_URL = window.location.protocol === "file:" ? "" : "/api/state";
 const ADMIN_CODE = "1234";
+
+function sharedApiUrls() {
+  if (window.location.protocol === "file:") return [];
+  const urls = ["/api/state"];
+  if (window.location.port !== "3000") {
+    urls.push(`${window.location.protocol}//${window.location.hostname}:3000/api/state`);
+  }
+  return [...new Set(urls)];
+}
+
+const SHARED_API_URLS = sharedApiUrls();
 
 const games = ["리그 오브 레전드", "발로란트", "오버워치 2", "배틀그라운드", "로스트아크", "메이플스토리"];
 
@@ -52,7 +62,8 @@ const initialState = {
 };
 
 let state = loadState();
-let sharedStateLoaded = !SHARED_API_URL;
+let sharedApiUrl = SHARED_API_URLS[0] || "";
+let sharedStateLoaded = !SHARED_API_URLS.length;
 let sharedSaveTimer = 0;
 let sharedSyncTimer = 0;
 
@@ -106,30 +117,34 @@ function applySharedState(data) {
 }
 
 async function loadSharedState(silent = false) {
-  if (!SHARED_API_URL) return;
-  try {
-    const response = await fetch(SHARED_API_URL, { cache: "no-store" });
-    if (!response.ok) throw new Error("Shared state request failed");
-    applySharedState(await response.json());
-    sharedStateLoaded = true;
-    renderAll(false);
-  } catch {
-    sharedStateLoaded = false;
-    if (!silent) showToast("공유 서버에 연결할 수 없어 이 브라우저에만 저장됩니다.");
+  if (!SHARED_API_URLS.length) return;
+  for (const url of SHARED_API_URLS) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error("Shared state request failed");
+      sharedApiUrl = url;
+      applySharedState(await response.json());
+      sharedStateLoaded = true;
+      renderAll(false);
+      return;
+    } catch {
+      sharedStateLoaded = false;
+    }
   }
+  if (!silent) showToast("공유 서버에 연결할 수 없어 이 브라우저에만 저장됩니다.");
 }
 
 function startSharedSync() {
-  if (!SHARED_API_URL || sharedSyncTimer) return;
+  if (!SHARED_API_URLS.length || sharedSyncTimer) return;
   sharedSyncTimer = window.setInterval(() => loadSharedState(true), 3500);
 }
 
 function saveSharedState() {
-  if (!SHARED_API_URL || !sharedStateLoaded) return;
+  if (!sharedApiUrl || !sharedStateLoaded) return;
   window.clearTimeout(sharedSaveTimer);
   sharedSaveTimer = window.setTimeout(async () => {
     try {
-      await fetch(SHARED_API_URL, {
+      await fetch(sharedApiUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sharedStatePayload())
