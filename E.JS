@@ -80,6 +80,8 @@ let sharedSyncTimer = 0;
 let sharedLoadInFlight = false;
 let sharedSaveInFlight = false;
 let sharedSaveQueued = false;
+let sharedMutationVersion = 0;
+let sharedSaveRetryDelay = 0;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -217,14 +219,20 @@ async function loadSharedState(silent = false) {
   if (!SHARED_API_URLS.length) return;
   if (sharedSaveTimer || sharedSaveInFlight || sharedSaveQueued) return;
   if (sharedLoadInFlight) return;
+  const loadMutationVersion = sharedMutationVersion;
   sharedLoadInFlight = true;
   for (const url of SHARED_API_URLS) {
     try {
       const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error("Shared state request failed");
       sharedApiUrl = url;
-      applySharedState(await response.json());
+      const nextSharedState = await response.json();
       sharedStateLoaded = true;
+      if (loadMutationVersion !== sharedMutationVersion || sharedSaveTimer || sharedSaveInFlight || sharedSaveQueued) {
+        sharedLoadInFlight = false;
+        return;
+      }
+      applySharedState(nextSharedState);
       renderAll(false);
       sharedLoadInFlight = false;
       return;
@@ -238,12 +246,13 @@ async function loadSharedState(silent = false) {
 
 function startSharedSync() {
   if (!SHARED_API_URLS.length || sharedSyncTimer) return;
-  sharedSyncTimer = window.setInterval(() => loadSharedState(true), 500);
+  sharedSyncTimer = window.setInterval(() => loadSharedState(true), 2000);
 }
 
 function saveSharedState() {
   if (!sharedApiUrl || !sharedStateLoaded) return;
   sharedSaveQueued = true;
+  sharedMutationVersion += 1;
   window.clearTimeout(sharedSaveTimer);
   sharedSaveTimer = window.setTimeout(async () => {
     sharedSaveTimer = 0;
@@ -253,18 +262,32 @@ function saveSharedState() {
     }
     sharedSaveInFlight = true;
     sharedSaveQueued = false;
+    const saveMutationVersion = sharedMutationVersion;
     try {
       const response = await fetch(sharedApiUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sharedStatePayload())
       });
-      if (response.ok) applySharedState(await response.json());
+      const nextSharedState = response.ok ? await response.json() : null;
+      if (nextSharedState && saveMutationVersion === sharedMutationVersion && !sharedSaveQueued) {
+        applySharedState(nextSharedState);
+      }
     } catch {
+      sharedSaveQueued = true;
+      sharedSaveRetryDelay = 1000;
       showToast("공유 서버 저장에 실패했습니다.");
     } finally {
       sharedSaveInFlight = false;
-      if (sharedSaveQueued) saveSharedState();
+      if (sharedSaveQueued) {
+        const retryDelay = sharedSaveRetryDelay;
+        sharedSaveRetryDelay = 0;
+        if (retryDelay) {
+          window.setTimeout(() => saveSharedState(), retryDelay);
+        } else {
+          saveSharedState();
+        }
+      }
     }
   }, 250);
 }
