@@ -574,6 +574,8 @@ function renderLoginState() {
   }
   state.authMode = state.authMode === "signup" ? "signup" : "login";
   const isSignup = state.authMode === "signup";
+  $("#loginForm").classList.toggle("auth-login", !isSignup);
+  $("#loginForm").classList.toggle("auth-signup", isSignup);
   $("#loginTitle").textContent = isSignup ? "회원가입" : "로그인";
   $("#loginHelp").textContent = isSignup ? "ID, 비밀번호, 닉네임, 성별, 나이를 입력해 계정을 만듭니다." : "가입한 ID와 비밀번호만 입력하면 바로 들어갑니다.";
   $("#loginSubmit").textContent = isSignup ? "회원가입" : "로그인";

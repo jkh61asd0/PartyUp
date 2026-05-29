@@ -313,6 +313,14 @@ label {
   display: none !important;
 }
 
+.auth-login [data-signup-field] {
+  display: none !important;
+}
+
+.auth-signup [data-signup-field] {
+  display: grid;
+}
+
 input,
 select,
 textarea {
