@@ -19,7 +19,7 @@ const MIME_TYPES = {
 };
 
 function defaultData() {
-  return { recruits: [], rooms: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
+  return { recruits: [], rooms: {}, friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
 }
 
 function readDatabase() {
@@ -28,6 +28,9 @@ function readDatabase() {
     return {
       recruits: Array.isArray(data.recruits) ? data.recruits : [],
       rooms: data.rooms && typeof data.rooms === "object" && !Array.isArray(data.rooms) ? data.rooms : {},
+      friendRequests: Array.isArray(data.friendRequests) ? data.friendRequests : [],
+      friendships: Array.isArray(data.friendships) ? data.friendships : [],
+      directMessages: data.directMessages && typeof data.directMessages === "object" && !Array.isArray(data.directMessages) ? data.directMessages : {},
       boardPosts: Array.isArray(data.boardPosts) ? data.boardPosts : [],
       lobbyMessages: Array.isArray(data.lobbyMessages) ? data.lobbyMessages : [],
       reports: Array.isArray(data.reports) ? data.reports : [],
@@ -77,6 +80,9 @@ async function handleApi(req, res) {
     const nextData = {
       recruits: Array.isArray(input.recruits) ? input.recruits : [],
       rooms: input.rooms && typeof input.rooms === "object" && !Array.isArray(input.rooms) ? input.rooms : {},
+      friendRequests: Array.isArray(input.friendRequests) ? input.friendRequests : [],
+      friendships: Array.isArray(input.friendships) ? input.friendships : [],
+      directMessages: input.directMessages && typeof input.directMessages === "object" && !Array.isArray(input.directMessages) ? input.directMessages : {},
       boardPosts: Array.isArray(input.boardPosts) ? input.boardPosts : [],
       lobbyMessages: Array.isArray(input.lobbyMessages) ? input.lobbyMessages : [],
       reports: Array.isArray(input.reports) ? input.reports : [],

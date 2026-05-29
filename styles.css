@@ -335,6 +335,12 @@ textarea {
   gap: 12px;
 }
 
+.inline-title {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
 .recruit-card,
 .board-card,
 .friend,

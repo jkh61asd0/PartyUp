@@ -47,6 +47,9 @@ const initialState = {
   bans: [],
   recruits: [],
   rooms: {},
+  friendRequests: [],
+  friendships: [],
+  directMessages: {},
   friends: [],
   dms: {},
   boardPosts: [],
@@ -94,6 +97,9 @@ function sharedStatePayload() {
   return {
     recruits: state.recruits,
     rooms: state.rooms,
+    friendRequests: state.friendRequests,
+    friendships: state.friendships,
+    directMessages: state.directMessages,
     boardPosts: state.boardPosts,
     lobbyMessages: state.lobbyMessages,
     reports: state.reports,
@@ -106,12 +112,16 @@ function applySharedState(data) {
   const previousLobbyId = state.lobbyMessages.at(-1)?.id || "";
   if (Array.isArray(data.recruits)) state.recruits = data.recruits;
   state.rooms = data.rooms && typeof data.rooms === "object" && !Array.isArray(data.rooms) ? data.rooms : {};
+  if (Array.isArray(data.friendRequests)) state.friendRequests = data.friendRequests;
+  if (Array.isArray(data.friendships)) state.friendships = data.friendships;
+  state.directMessages = data.directMessages && typeof data.directMessages === "object" && !Array.isArray(data.directMessages) ? data.directMessages : {};
   if (Array.isArray(data.boardPosts)) state.boardPosts = data.boardPosts;
   if (Array.isArray(data.lobbyMessages)) state.lobbyMessages = data.lobbyMessages;
   if (Array.isArray(data.reports)) state.reports = data.reports;
   if (Array.isArray(data.bans)) state.bans = data.bans;
   normalizeBoardPosts();
   normalizeLobbyMessages();
+  normalizeFriendData();
   normalizeAdminData();
   syncCurrentRoomFromShared();
   const nextLobbyMessage = state.lobbyMessages.at(-1);
@@ -130,6 +140,7 @@ function normalizeRoom(room = {}) {
     ...clone(initialState.room),
     ...room,
     participants: Array.isArray(room.participants) ? [...new Set(room.participants.filter(Boolean))] : [],
+    kicked: Array.isArray(room.kicked) ? [...new Set(room.kicked.filter(Boolean))] : [],
     messages: Array.isArray(room.messages) ? room.messages.slice(-300) : []
   };
 }
@@ -146,6 +157,11 @@ function syncCurrentRoomFromShared() {
   }
   if (sharedRoom) {
     state.room = normalizeRoom(sharedRoom);
+    if (state.room.kicked.includes(displayName())) {
+      state.currentRoomId = "";
+      state.room = blankRoom();
+      showToast("방에서 강퇴되었습니다.");
+    }
   }
 }
 
@@ -266,6 +282,47 @@ function displayName() {
 function currentSettings() {
   state.settings = { ...clone(initialState.settings), ...(state.settings || {}) };
   return state.settings;
+}
+
+function friendPairKey(a, b) {
+  return [a, b].map((name) => String(name || "").trim()).sort((left, right) => left.localeCompare(right, "ko-KR")).join("::");
+}
+
+function normalizeFriendData() {
+  state.friendRequests = Array.isArray(state.friendRequests) ? state.friendRequests : [];
+  state.friendships = Array.isArray(state.friendships) ? state.friendships : [];
+  state.directMessages = state.directMessages && typeof state.directMessages === "object" && !Array.isArray(state.directMessages) ? state.directMessages : {};
+
+  state.friendRequests.forEach((request) => {
+    if (!request.id) request.id = `fr${Date.now()}${Math.random().toString(16).slice(2)}`;
+    if (!request.status) request.status = "대기";
+    if (!request.createdAt) request.createdAt = new Date().toISOString();
+  });
+  state.friendships.forEach((friendship) => {
+    if (!friendship.id) friendship.id = `fs${Date.now()}${Math.random().toString(16).slice(2)}`;
+    friendship.users = Array.isArray(friendship.users) ? [...new Set(friendship.users.filter(Boolean))] : [];
+    if (!friendship.createdAt) friendship.createdAt = new Date().toISOString();
+  });
+  Object.keys(state.directMessages).forEach((key) => {
+    state.directMessages[key] = Array.isArray(state.directMessages[key]) ? state.directMessages[key].slice(-300) : [];
+    state.directMessages[key].forEach((message) => {
+      if (!message.id) message.id = `dm${Date.now()}${Math.random().toString(16).slice(2)}`;
+      if (!message.createdAt) message.createdAt = new Date().toISOString();
+    });
+  });
+}
+
+function friendshipWith(nickname) {
+  const me = displayName();
+  return state.friendships.find((friendship) => friendship.users.includes(me) && friendship.users.includes(nickname));
+}
+
+function friendNicknames() {
+  const me = displayName();
+  return state.friendships
+    .filter((friendship) => friendship.users.includes(me))
+    .map((friendship) => friendship.users.find((nickname) => nickname !== me))
+    .filter(Boolean);
 }
 
 function applySettings() {
@@ -489,33 +546,70 @@ function renderRecruitCard(item) {
 }
 
 function renderFriends() {
-  const friends = state.friends.filter((friend) => !state.blocked.includes(friend.nickname));
-  $("#friendList").innerHTML = friends.length
+  normalizeFriendData();
+  const me = displayName();
+  const friends = friendNicknames().filter((nickname) => !state.blocked.includes(nickname));
+  const incoming = state.friendRequests.filter((request) => request.to === me && request.status === "대기" && !state.blocked.includes(request.from));
+  const outgoing = state.friendRequests.filter((request) => request.from === me && request.status === "대기" && !state.blocked.includes(request.to));
+  const friendRows = friends.length
     ? friends
         .map(
-          (friend) => `
+          (nickname) => `
         <article class="friend">
           <div class="friend-main">
-            <strong><span class="status-dot ${friend.presence}"></span>${escapeHtml(friend.nickname)}</strong>
-            <span>${escapeHtml(friend.status)} · ${escapeHtml(friend.activity)}</span>
+            <strong><span class="status-dot"></span>${escapeHtml(nickname)}</strong>
+            <span>친구 · 메시지 가능</span>
           </div>
           <div class="mini-actions">
-            <button class="ghost-button" data-dm="${friend.id}">메시지</button>
-            <button class="danger-button" data-report="${escapeHtml(friend.nickname)}">신고</button>
-            <button class="danger-button" data-block="${escapeHtml(friend.nickname)}">차단</button>
+            <button class="ghost-button" data-dm="${escapeHtml(nickname)}">메시지</button>
+            <button class="danger-button" data-remove-friend="${escapeHtml(nickname)}">삭제</button>
+            <button class="danger-button" data-report="${escapeHtml(nickname)}">신고</button>
+            <button class="danger-button" data-block="${escapeHtml(nickname)}">차단</button>
           </div>
         </article>`
         )
         .join("")
-    : '<div class="empty">표시할 친구가 없습니다.</div>';
+    : '<div class="empty">아직 친구가 없습니다.</div>';
+  const incomingRows = incoming.length
+    ? incoming
+        .map(
+          (request) => `
+        <article class="friend">
+          <div class="friend-main">
+            <strong>${escapeHtml(request.from)}</strong>
+            <span>친구 요청을 보냈습니다.</span>
+          </div>
+          <div class="mini-actions">
+            <button class="ghost-button" data-accept-friend="${escapeHtml(request.id)}">수락</button>
+            <button class="danger-button" data-decline-friend="${escapeHtml(request.id)}">거절</button>
+          </div>
+        </article>`
+        )
+        .join("")
+    : '<div class="empty">받은 친구 요청이 없습니다.</div>';
+  const outgoingRows = outgoing.length
+    ? outgoing.map((request) => `<div class="simple-item"><strong>${escapeHtml(request.to)}</strong><span class="subtle">수락 대기중</span></div>`).join("")
+    : '<div class="empty">보낸 친구 요청이 없습니다.</div>';
+
+  $("#friendList").innerHTML = `
+    <div class="simple-list">
+      <h3 class="inline-title">친구</h3>
+      ${friendRows}
+      <h3 class="inline-title">받은 요청</h3>
+      ${incomingRows}
+      <h3 class="inline-title">보낸 요청</h3>
+      ${outgoingRows}
+    </div>`;
   renderDm();
 }
 
 function renderDm() {
-  const friend = state.friends.find((item) => item.id === state.selectedFriendId && !state.blocked.includes(item.nickname));
-  $("#messageTarget").textContent = friend ? friend.nickname : "개인 메시지";
-  $("#messageStatus").textContent = friend ? friend.activity : "대상을 선택하세요";
-  const messages = friend ? state.dms[friend.id] || [] : [];
+  const nickname = state.selectedFriendId;
+  const isFriend = nickname && friendshipWith(nickname) && !state.blocked.includes(nickname);
+  const messageKey = isFriend ? friendPairKey(displayName(), nickname) : "";
+  $("#messageTarget").textContent = isFriend ? nickname : "개인 메시지";
+  $("#messageStatus").textContent = isFriend ? "친구" : "대상을 선택하세요";
+  const messages = isFriend ? state.directMessages[messageKey] || [] : [];
   $("#dmLog").innerHTML = messages.length
     ? messages.map((message) => renderBubble(message)).join("")
     : '<div class="empty">메시지가 없습니다.</div>';
@@ -660,6 +754,7 @@ function renderRoom() {
               ? ""
               : `<div class="mini-actions">
                   <button class="ghost-button" data-friend="${escapeHtml(nickname)}">친구</button>
+                  ${isOwner ? `<button class="danger-button" data-kick="${escapeHtml(nickname)}">강퇴</button>` : ""}
                   <button class="danger-button" data-report="${escapeHtml(nickname)}">신고</button>
                   <button class="danger-button" data-block="${escapeHtml(nickname)}">차단</button>
                 </div>`
@@ -770,22 +865,65 @@ function renderAll(syncShared = true) {
   saveState(syncShared);
 }
 
-function addFriend(nickname) {
-  if (!nickname || nickname === displayName()) return;
+function sendFriendRequest(nickname) {
+  nickname = String(nickname || "").trim();
+  const me = displayName();
+  if (!nickname || nickname === me) return;
   if (state.blocked.includes(nickname)) {
-    showToast("차단한 사용자는 친구로 추가할 수 없습니다.");
+    showToast("차단한 사용자에게는 친구 요청을 보낼 수 없습니다.");
     return;
   }
-  if (state.friends.some((friend) => friend.nickname === nickname)) {
-    showToast("이미 친구 목록에 있습니다.");
+  normalizeFriendData();
+  if (friendshipWith(nickname)) {
+    showToast("이미 친구입니다.");
     return;
   }
-  const id = `f${Date.now()}`;
-  state.friends.push({ id, nickname, status: "온라인", activity: "새 친구", presence: "online" });
-  state.dms[id] = [];
-  state.selectedFriendId = id;
+  const existing = state.friendRequests.find((request) => request.status === "대기" && ((request.from === me && request.to === nickname) || (request.from === nickname && request.to === me)));
+  if (existing?.from === me) {
+    showToast("이미 친구 요청을 보냈습니다.");
+    return;
+  }
+  if (existing?.to === me) {
+    acceptFriendRequest(existing.id);
+    return;
+  }
+  state.friendRequests.unshift({ id: `fr${Date.now()}`, from: me, to: nickname, status: "대기", createdAt: new Date().toISOString() });
   renderAll();
-  showToast("친구를 추가했습니다.");
+  showToast("친구 요청을 보냈습니다.");
+}
+
+function acceptFriendRequest(requestId) {
+  normalizeFriendData();
+  const request = state.friendRequests.find((item) => item.id === requestId && item.to === displayName() && item.status === "대기");
+  if (!request) return;
+  request.status = "수락";
+  const key = friendPairKey(request.from, request.to);
+  if (!state.friendships.some((friendship) => friendPairKey(...friendship.users) === key)) {
+    state.friendships.unshift({ id: `fs${Date.now()}`, users: [request.from, request.to], createdAt: new Date().toISOString() });
+  }
+  if (!state.directMessages[key]) state.directMessages[key] = [];
+  state.selectedFriendId = request.from;
+  renderAll();
+  showToast("친구 요청을 수락했습니다.");
+}
+
+function declineFriendRequest(requestId) {
+  const request = state.friendRequests.find((item) => item.id === requestId && item.to === displayName() && item.status === "대기");
+  if (!request) return;
+  request.status = "거절";
+  renderAll();
+  showToast("친구 요청을 거절했습니다.");
+}
+
+function removeFriend(nickname) {
+  normalizeFriendData();
+  if (!confirm(`${nickname}님을 친구에서 삭제할까요?`)) return;
+  const key = friendPairKey(displayName(), nickname);
+  state.friendships = state.friendships.filter((friendship) => friendPairKey(...friendship.users) !== key);
+  state.friendRequests = state.friendRequests.filter((request) => friendPairKey(request.from, request.to) !== key);
+  if (state.selectedFriendId === nickname) state.selectedFriendId = "";
+  renderAll();
+  showToast("친구를 삭제했습니다.");
 }
 
 function reportUser(target) {
@@ -861,9 +999,30 @@ function deleteRecruitRoom(recruitId) {
   showToast("방을 삭제했습니다.");
 }
 
+function kickRoomParticipant(nickname) {
+  if (!state.currentRoomId || state.room.owner !== displayName() || nickname === displayName()) return;
+  if (!confirm(`${nickname}님을 이 방에서 강퇴할까요?`)) return;
+  const recruit = state.recruits.find((item) => item.id === state.currentRoomId);
+  if (recruit) {
+    recruit.requests = recruit.requests.filter((request) => request.nickname !== nickname);
+  }
+  updateSharedRoom((room) => {
+    room.participants = room.participants.filter((participant) => participant !== nickname);
+    room.kicked = [...new Set([...(room.kicked || []), nickname])];
+    room.messages.push({ id: `m${Date.now()}`, from: "시스템", text: `${nickname}님이 강퇴되었습니다.`, createdAt: new Date().toISOString() });
+  });
+  renderAll();
+  showToast("강퇴했습니다.");
+}
+
 function joinRecruitRoom(recruit) {
   const isOwner = recruit.owner === displayName();
   const accepted = recruit.requests.some((request) => request.nickname === displayName() && request.status === "허락");
+  const existingRoom = state.rooms?.[recruit.id];
+  if (existingRoom?.kicked?.includes(displayName())) {
+    showToast("이 방에서 강퇴되어 다시 입장할 수 없습니다.");
+    return;
+  }
   if (state.currentRoomId && state.currentRoomId !== recruit.id) {
     showToast("이미 다른 방에 있어서 입장할 수 없습니다.");
     return;
@@ -887,7 +1046,6 @@ function joinRecruitRoom(recruit) {
   state.room.password = recruit.password || "";
   state.room.intro = recruit.intro || "";
   const participants = [displayName(), recruit.owner, ...recruit.requests.filter((request) => request.status === "허락").map((request) => request.nickname)];
-  const existingRoom = state.rooms?.[recruit.id];
   state.room = normalizeRoom({
     ...state.room,
     ...(existingRoom || {}),
@@ -1009,6 +1167,34 @@ function bindEvents() {
         if (request.nickname === beforeName) request.nickname = nextName;
       });
     });
+    Object.keys(state.rooms || {}).forEach((roomId) => {
+      const room = state.rooms[roomId];
+      if (room.owner === beforeName) room.owner = nextName;
+      room.participants = Array.isArray(room.participants) ? room.participants.map((participant) => (participant === beforeName ? nextName : participant)) : [];
+      if (Array.isArray(room.messages)) {
+        room.messages.forEach((message) => {
+          if (message.from === beforeName) message.from = nextName;
+        });
+      }
+    });
+    state.friendRequests.forEach((request) => {
+      if (request.from === beforeName) request.from = nextName;
+      if (request.to === beforeName) request.to = nextName;
+    });
+    state.friendships.forEach((friendship) => {
+      friendship.users = friendship.users.map((nickname) => (nickname === beforeName ? nextName : nickname));
+    });
+    const renamedMessages = {};
+    Object.entries(state.directMessages || {}).forEach(([key, messages]) => {
+      const names = key.split("::").map((nickname) => (nickname === beforeName ? nextName : nickname));
+      const nextKey = friendPairKey(names[0], names[1]);
+      renamedMessages[nextKey] = Array.isArray(messages) ? messages : [];
+      renamedMessages[nextKey].forEach((message) => {
+        if (message.from === beforeName) message.from = nextName;
+      });
+    });
+    state.directMessages = renamedMessages;
+    if (state.selectedFriendId === beforeName) state.selectedFriendId = nextName;
     state.boardPosts.forEach((post) => {
       if (post.author === beforeName) post.author = nextName;
       post.messages.forEach((message) => {
@@ -1137,7 +1323,11 @@ function bindEvents() {
     }
 
     if (target.dataset.deleteRoom) deleteRecruitRoom(target.dataset.deleteRoom);
-    if (target.dataset.friend) addFriend(target.dataset.friend);
+    if (target.dataset.friend) sendFriendRequest(target.dataset.friend);
+    if (target.dataset.acceptFriend) acceptFriendRequest(target.dataset.acceptFriend);
+    if (target.dataset.declineFriend) declineFriendRequest(target.dataset.declineFriend);
+    if (target.dataset.removeFriend) removeFriend(target.dataset.removeFriend);
+    if (target.dataset.kick) kickRoomParticipant(target.dataset.kick);
     if (target.dataset.report) reportUser(target.dataset.report);
     if (target.dataset.block) blockUser(target.dataset.block);
     if (target.dataset.banTarget) {
@@ -1221,7 +1411,7 @@ function bindEvents() {
     event.preventDefault();
     const nickname = $("#friendSearchInput").value.trim();
     if (!nickname) return;
-    addFriend(nickname);
+    sendFriendRequest(nickname);
     $("#friendSearchInput").value = "";
   });
 
@@ -1230,7 +1420,13 @@ function bindEvents() {
     if (!guardNotBanned()) return;
     const text = $("#dmInput").value.trim();
     if (!text || !state.selectedFriendId) return;
-    state.dms[state.selectedFriendId].push({ from: "me", text });
+    if (!friendshipWith(state.selectedFriendId)) {
+      showToast("친구 수락 후 메시지를 보낼 수 있습니다.");
+      return;
+    }
+    const messageKey = friendPairKey(displayName(), state.selectedFriendId);
+    if (!state.directMessages[messageKey]) state.directMessages[messageKey] = [];
+    state.directMessages[messageKey].push({ id: `dm${Date.now()}`, from: displayName(), text, createdAt: new Date().toISOString() });
     $("#dmInput").value = "";
     renderDm();
     saveState();
