@@ -215,6 +215,13 @@ function updateSharedRoom(mutator) {
   return state.room;
 }
 
+async function waitForSharedLoad() {
+  const startedAt = Date.now();
+  while (sharedLoadInFlight && Date.now() - startedAt < 5000) {
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  }
+}
+
 async function loadSharedState(silent = false) {
   if (!SHARED_API_URLS.length) return;
   if (sharedSaveTimer || sharedSaveInFlight || sharedSaveQueued) return;
@@ -844,11 +851,12 @@ function renderRoomSettingsForm() {
 }
 
 function renderSafety() {
+  const visibleReports = state.reports.filter((report) => !report.deletedAt);
   $("#blockedList").innerHTML = state.blocked.length
     ? state.blocked.map((name) => `<div class="simple-item">${escapeHtml(name)}</div>`).join("")
     : '<div class="empty">차단한 사용자가 없습니다.</div>';
-  $("#reportList").innerHTML = state.reports.length
-    ? state.reports
+  $("#reportList").innerHTML = visibleReports.length
+    ? visibleReports
         .map((report) => `<div class="simple-item"><strong>${escapeHtml(report.target)}</strong><span class="subtle">${escapeHtml(report.reason)}</span></div>`)
         .join("")
     : '<div class="empty">신고 기록이 없습니다.</div>';
@@ -856,7 +864,7 @@ function renderSafety() {
 
 function renderAdmin() {
   normalizeAdminData();
-  const reports = state.reports;
+  const reports = state.reports.filter((report) => !report.deletedAt && !["처리됨", "취소"].includes(report.status));
   const bans = activeBans();
   $("#adminReportCount").textContent = `${reports.length}건`;
   $("#adminReports").innerHTML = reports.length
@@ -879,6 +887,7 @@ function renderAdmin() {
                 <option value="forever">영구정지</option>
               </select>
               <button class="danger-button" data-ban-target="${escapeHtml(report.target)}" data-report-id="${escapeHtml(report.id)}">정지</button>
+              <button class="ghost-button" data-dismiss-report="${escapeHtml(report.id)}">취소</button>
             </div>
           </article>`;
         })
@@ -1043,9 +1052,26 @@ function banUser(target, duration, reportId = "") {
   });
 
   const report = state.reports.find((item) => item.id === reportId);
-  if (report) report.status = "처리됨";
+  if (report) {
+    report.status = "처리됨";
+    report.deletedAt = new Date().toISOString();
+    state.deletedReportIds = [...new Set([...(state.deletedReportIds || []), report.id])];
+    state.reports = state.reports.filter((item) => item.id !== report.id);
+  }
   renderAll();
   showToast(`${target} 닉네임을 ${banDurationLabel(duration)} 정지했습니다.`);
+}
+
+function dismissReport(reportId) {
+  const report = state.reports.find((item) => item.id === reportId);
+  if (!report) return;
+  if (!confirm(`${report.target} 신고를 취소할까요? 정지 없이 목록에서 사라집니다.`)) return;
+  report.status = "취소";
+  report.deletedAt = new Date().toISOString();
+  state.deletedReportIds = [...new Set([...(state.deletedReportIds || []), report.id])];
+  state.reports = state.reports.filter((item) => item.id !== report.id);
+  renderAll();
+  showToast("신고를 취소했습니다.");
 }
 
 function unbanUser(banId) {
@@ -1205,11 +1231,14 @@ function bindEvents() {
     showToast("새로고침 완료");
   });
 
-  $("#loginForm").addEventListener("submit", (event) => {
+  $("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const nickname = data.nickname.trim();
     if (!nickname) return;
+    await waitForSharedLoad();
+    await loadSharedState(true);
+    await waitForSharedLoad();
     const ban = activeBanFor(nickname);
     if (ban) {
       showToast(banMessage(ban));
@@ -1223,12 +1252,15 @@ function bindEvents() {
     showToast(`${nickname}님, 환영합니다.`);
   });
 
-  $("#profileForm").addEventListener("submit", (event) => {
+  $("#profileForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const beforeName = displayName();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const nextName = data.nickname.trim();
     if (!nextName) return;
+    await waitForSharedLoad();
+    await loadSharedState(true);
+    await waitForSharedLoad();
     const ban = activeBanFor(nextName);
     if (ban) {
       showToast(banMessage(ban));
@@ -1427,6 +1459,7 @@ function bindEvents() {
       const duration = target.closest(".admin-card")?.querySelector("[data-ban-duration]")?.value || "10m";
       banUser(target.dataset.banTarget, duration, reportId);
     }
+    if (target.dataset.dismissReport) dismissReport(target.dataset.dismissReport);
     if (target.dataset.unban) unbanUser(target.dataset.unban);
     if (target.dataset.dm) {
       state.selectedFriendId = target.dataset.dm;
