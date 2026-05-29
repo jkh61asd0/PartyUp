@@ -2,7 +2,7 @@ const APP_STATE_ID = "partyup";
 const REDIS_KEY = "partyup:state";
 
 function defaultData() {
-  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [], userAccounts: [] };
+  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], deletedAccountIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [], userAccounts: [] };
 }
 
 function normalizeData(input = {}) {
@@ -15,6 +15,7 @@ function normalizeData(input = {}) {
     deletedCommentIds: Array.isArray(input.deletedCommentIds) ? input.deletedCommentIds : [],
     deletedReportIds: Array.isArray(input.deletedReportIds) ? input.deletedReportIds : [],
     deletedBanIds: Array.isArray(input.deletedBanIds) ? input.deletedBanIds : [],
+    deletedAccountIds: Array.isArray(input.deletedAccountIds) ? input.deletedAccountIds : [],
     friendRequests: Array.isArray(input.friendRequests) ? input.friendRequests : [],
     friendships: Array.isArray(input.friendships) ? input.friendships : [],
     directMessages: input.directMessages && typeof input.directMessages === "object" && !Array.isArray(input.directMessages) ? input.directMessages : {},
@@ -98,13 +99,13 @@ function mergeById(current = [], incoming = []) {
   return [...merged.values()];
 }
 
-function mergeUserAccounts(current = [], incoming = []) {
+function mergeUserAccounts(current = [], incoming = [], deletedAccountIds = []) {
   const merged = new Map();
   current.forEach((account) => {
-    if (account?.loginId) merged.set(String(account.loginId).trim().toLowerCase(), account);
+    if (account?.loginId && !deletedAccountIds.includes(account.id)) merged.set(String(account.loginId).trim().toLowerCase(), account);
   });
   incoming.forEach((account) => {
-    if (!account?.loginId) return;
+    if (!account?.loginId || deletedAccountIds.includes(account.id)) return;
     const loginId = String(account.loginId).trim().toLowerCase();
     merged.set(loginId, { ...(merged.get(loginId) || {}), ...account, loginId });
   });
@@ -155,6 +156,7 @@ function mergeState(currentInput = {}, incomingInput = {}) {
   const deletedCommentIds = [...new Set([...current.deletedCommentIds, ...normalizedIncoming.deletedCommentIds])];
   const deletedReportIds = [...new Set([...current.deletedReportIds, ...normalizedIncoming.deletedReportIds])];
   const deletedBanIds = [...new Set([...current.deletedBanIds, ...normalizedIncoming.deletedBanIds])];
+  const deletedAccountIds = [...new Set([...current.deletedAccountIds, ...normalizedIncoming.deletedAccountIds])];
   return {
     recruits: Object.prototype.hasOwnProperty.call(incoming, "recruits") ? mergeRecruits(current.recruits, normalizedIncoming.recruits, deletedRecruitIds) : current.recruits.filter((recruit) => !deletedRecruitIds.includes(recruit.id)),
     rooms: mergeRooms(current.rooms, normalizedIncoming.rooms, deletedRoomIds),
@@ -164,6 +166,7 @@ function mergeState(currentInput = {}, incomingInput = {}) {
     deletedCommentIds,
     deletedReportIds,
     deletedBanIds,
+    deletedAccountIds,
     friendRequests: mergeById(current.friendRequests, normalizedIncoming.friendRequests),
     friendships: mergeById(current.friendships, normalizedIncoming.friendships),
     directMessages: mergeObjectMessageLists(current.directMessages, normalizedIncoming.directMessages),
@@ -173,7 +176,7 @@ function mergeState(currentInput = {}, incomingInput = {}) {
     lobbyMessages: mergeMessages(current.lobbyMessages, normalizedIncoming.lobbyMessages),
     reports: mergeById(current.reports, normalizedIncoming.reports).filter((report) => !deletedReportIds.includes(report.id)),
     bans: mergeById(current.bans, normalizedIncoming.bans).filter((ban) => !deletedBanIds.includes(ban.id)),
-    userAccounts: mergeUserAccounts(current.userAccounts, normalizedIncoming.userAccounts)
+    userAccounts: mergeUserAccounts(current.userAccounts, normalizedIncoming.userAccounts, deletedAccountIds)
   };
 }
 

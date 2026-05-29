@@ -19,6 +19,7 @@ const initialState = {
   isLoggedIn: false,
   isAdmin: false,
   currentAccountId: "",
+  authMode: "login",
   settings: {
     theme: "system",
     density: "comfortable",
@@ -47,6 +48,7 @@ const initialState = {
   reports: [],
   bans: [],
   userAccounts: [],
+  deletedAccountIds: [],
   recruits: [],
   rooms: {},
   deletedRecruitIds: [],
@@ -123,7 +125,8 @@ function sharedStatePayload() {
     lobbyMessages: state.lobbyMessages,
     reports: state.reports,
     bans: state.bans,
-    userAccounts: state.userAccounts
+    userAccounts: state.userAccounts,
+    deletedAccountIds: state.deletedAccountIds
   };
 }
 
@@ -146,6 +149,7 @@ function applySharedState(data) {
   if (Array.isArray(data.reports)) state.reports = data.reports;
   if (Array.isArray(data.bans)) state.bans = data.bans;
   if (Array.isArray(data.userAccounts)) state.userAccounts = data.userAccounts;
+  if (Array.isArray(data.deletedAccountIds)) state.deletedAccountIds = data.deletedAccountIds;
   normalizeBoardPosts();
   normalizeLobbyMessages();
   normalizeFriendData();
@@ -390,11 +394,13 @@ async function passwordHash(loginId, password) {
 
 function normalizeUserAccounts() {
   state.userAccounts = Array.isArray(state.userAccounts) ? state.userAccounts : [];
+  state.deletedAccountIds = Array.isArray(state.deletedAccountIds) ? state.deletedAccountIds : [];
   state.userAccounts.forEach((account) => {
     account.loginId = normalizeLoginId(account.loginId);
     if (!account.id) account.id = `u${Date.now()}${Math.random().toString(16).slice(2)}`;
     if (!account.createdAt) account.createdAt = new Date().toISOString();
   });
+  state.userAccounts = state.userAccounts.filter((account) => !state.deletedAccountIds.includes(account.id));
   const accountsByLoginId = new Map();
   state.userAccounts.forEach((account) => {
     if (account.loginId && !accountsByLoginId.has(account.loginId)) accountsByLoginId.set(account.loginId, account);
@@ -566,6 +572,20 @@ function renderLoginState() {
   if (state.isLoggedIn && activeBanFor(displayName())) {
     state.isLoggedIn = false;
   }
+  state.authMode = state.authMode === "signup" ? "signup" : "login";
+  const isSignup = state.authMode === "signup";
+  $("#loginTitle").textContent = isSignup ? "회원가입" : "로그인";
+  $("#loginHelp").textContent = isSignup ? "ID, 비밀번호, 닉네임, 성별, 나이를 입력해 계정을 만듭니다." : "가입한 ID와 비밀번호만 입력하면 바로 들어갑니다.";
+  $("#loginSubmit").textContent = isSignup ? "회원가입" : "로그인";
+  $("#loginNickname").required = isSignup;
+  $("#loginGender").required = isSignup;
+  $("#loginAge").required = isSignup;
+  $$("[data-signup-field]").forEach((node) => {
+    node.hidden = !isSignup;
+  });
+  $$("[data-auth-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.authMode === state.authMode);
+  });
   $("#loginScreen").classList.toggle("active", !state.isLoggedIn);
 }
 
@@ -917,8 +937,10 @@ function renderSafety() {
 
 function renderAdmin() {
   normalizeAdminData();
+  normalizeUserAccounts();
   const reports = state.reports.filter((report) => !report.deletedAt && !["처리됨", "취소"].includes(report.status));
   const bans = activeBans();
+  const users = [...state.userAccounts].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
   $("#adminReportCount").textContent = `${reports.length}건`;
   $("#adminReports").innerHTML = reports.length
     ? reports
@@ -962,6 +984,20 @@ function renderAdmin() {
         })
         .join("")
     : '<div class="empty">현재 정지된 닉네임이 없습니다.</div>';
+
+  $("#adminUsers").innerHTML = users.length
+    ? users
+        .map(
+          (account) => `<article class="admin-card">
+            <div>
+              <strong>${escapeHtml(account.loginId)}</strong>
+              <span class="card-meta">닉네임 ${escapeHtml(account.nickname || "없음")}</span>
+            </div>
+            <button class="danger-button" data-delete-account="${escapeHtml(account.id)}">삭제</button>
+          </article>`
+        )
+        .join("")
+    : '<div class="empty">가입된 회원이 없습니다.</div>';
 }
 
 function renderBubble(message) {
@@ -1135,6 +1171,22 @@ function unbanUser(banId) {
   showToast("정지를 해제했습니다.");
 }
 
+function deleteAccount(accountId) {
+  normalizeUserAccounts();
+  const account = state.userAccounts.find((item) => item.id === accountId);
+  if (!account) return;
+  if (!confirm(`${account.loginId} (${account.nickname || "닉네임 없음"}) 회원을 삭제할까요?`)) return;
+  state.deletedAccountIds = [...new Set([...(state.deletedAccountIds || []), account.id])];
+  state.userAccounts = state.userAccounts.filter((item) => item.id !== account.id);
+  if (state.currentAccountId === account.id) {
+    state.currentAccountId = "";
+    state.isLoggedIn = false;
+    state.isAdmin = false;
+  }
+  renderAll();
+  showToast("회원을 삭제했습니다.");
+}
+
 function deleteRecruitRoom(recruitId) {
   const recruit = state.recruits.find((item) => item.id === recruitId);
   if (!recruit || recruit.owner !== displayName()) {
@@ -1285,13 +1337,22 @@ function bindEvents() {
     showToast("새로고침 완료");
   });
 
+  $$("[data-auth-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.authMode = button.dataset.authMode === "signup" ? "signup" : "login";
+      renderLoginState();
+      saveState(false);
+    });
+  });
+
   $("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const loginId = normalizeLoginId(data.loginId);
     const password = String(data.password || "");
-    const nickname = data.nickname.trim();
-    if (!loginId || !password || !nickname) return;
+    const isSignup = state.authMode === "signup";
+    const nickname = String(data.nickname || "").trim();
+    if (!loginId || !password || (isSignup && !nickname)) return;
     await waitForSharedLoad();
     await loadSharedState(true);
     await waitForSharedLoad();
@@ -1300,6 +1361,10 @@ function bindEvents() {
     let account = accountByLoginId(loginId);
     if (account && account.passwordHash !== hash) {
       showToast("ID 또는 비밀번호가 맞지 않습니다.");
+      return;
+    }
+    if (!account && !isSignup) {
+      showToast("가입된 ID가 없습니다. 회원가입을 먼저 해주세요.");
       return;
     }
     if (!account) {
@@ -1320,9 +1385,12 @@ function bindEvents() {
         updatedAt: new Date().toISOString()
       };
       state.userAccounts.unshift(account);
+    } else if (isSignup) {
+      showToast("이미 가입된 ID입니다. 로그인으로 들어가세요.");
+      return;
     } else {
       const ownerOfNickname = nicknameAccount(nickname);
-      if (ownerOfNickname && ownerOfNickname.id !== account.id) {
+      if (nickname && ownerOfNickname && ownerOfNickname.id !== account.id) {
         showToast("이미 사용 중인 닉네임입니다.");
         return;
       }
@@ -1332,9 +1400,7 @@ function bindEvents() {
         showToast(banMessage(previousBan));
         return;
       }
-      account.nickname = nickname;
-      account.gender = data.gender;
-      account.age = data.age;
+      if (nickname) account.nickname = nickname;
       account.mainGame = account.mainGame || state.me.mainGame || initialState.me.mainGame;
       account.updatedAt = new Date().toISOString();
     }
@@ -1347,8 +1413,8 @@ function bindEvents() {
     state.isLoggedIn = true;
     state.currentAccountId = account.id;
     state.me.nickname = accountNickname;
-    state.me.gender = account.gender || data.gender;
-    state.me.age = account.age || data.age;
+    state.me.gender = account.gender || data.gender || initialState.me.gender;
+    state.me.age = account.age || data.age || initialState.me.age;
     state.me.mainGame = account.mainGame || state.me.mainGame || initialState.me.mainGame;
     state.room.participants = [accountNickname];
     renderAll();
@@ -1578,6 +1644,7 @@ function bindEvents() {
     }
     if (target.dataset.dismissReport) dismissReport(target.dataset.dismissReport);
     if (target.dataset.unban) unbanUser(target.dataset.unban);
+    if (target.dataset.deleteAccount) deleteAccount(target.dataset.deleteAccount);
     if (target.dataset.dm) {
       state.selectedFriendId = target.dataset.dm;
       renderDm();

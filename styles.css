@@ -452,6 +452,18 @@ textarea {
   color: var(--ink);
 }
 
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.auth-tabs .active {
+  border-color: rgba(47, 111, 237, 0.45);
+  background: rgba(47, 111, 237, 0.12);
+  color: var(--primary);
+}
+
 .split-layout,
 .board-layout,
 .lobby-layout,

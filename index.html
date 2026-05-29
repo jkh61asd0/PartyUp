@@ -348,6 +348,10 @@
               <h3>정지 목록</h3>
               <div id="adminBans" class="admin-list"></div>
             </div>
+            <div>
+              <h3>회원 목록</h3>
+              <div id="adminUsers" class="admin-list"></div>
+            </div>
           </div>
         </section>
 
@@ -469,8 +473,12 @@
           </div>
         </div>
         <div>
-          <h1>계정 로그인</h1>
-          <p class="subtle">처음 쓰는 ID는 계정이 만들어지고, 이미 있는 ID는 비밀번호로 로그인합니다.</p>
+          <h1 id="loginTitle">로그인</h1>
+          <p class="subtle" id="loginHelp">가입한 ID와 비밀번호만 입력하면 바로 들어갑니다.</p>
+        </div>
+        <div class="auth-tabs" role="tablist" aria-label="인증 방식">
+          <button class="ghost-button active" type="button" data-auth-mode="login">로그인</button>
+          <button class="ghost-button" type="button" data-auth-mode="signup">회원가입</button>
         </div>
         <label>로그인 ID
           <input name="loginId" required maxlength="24" placeholder="로그인 ID" autocomplete="username" />
@@ -478,28 +486,28 @@
         <label>로그인 비밀번호
           <input name="password" type="password" required minlength="4" maxlength="40" placeholder="비밀번호" autocomplete="current-password" />
         </label>
-        <label>닉네임
-          <input name="nickname" required maxlength="16" placeholder="사용할 닉네임" autocomplete="nickname" />
+        <label data-signup-field hidden>닉네임
+          <input name="nickname" id="loginNickname" maxlength="16" placeholder="사용할 닉네임" autocomplete="nickname" />
         </label>
-        <label>성별
-          <select name="gender" required>
+        <label data-signup-field hidden>성별
+          <select name="gender" id="loginGender">
             <option>남성</option>
             <option>여성</option>
           </select>
         </label>
-        <label>나이
-          <select name="age" required>
+        <label data-signup-field hidden>나이
+          <select name="age" id="loginAge">
             <option value="10">10대</option>
             <option value="20" selected>20대</option>
             <option value="30">30대</option>
             <option value="40">40대 이상</option>
           </select>
         </label>
-        <button class="primary-button wide" type="submit">로그인 / 가입</button>
+        <button class="primary-button wide" type="submit" id="loginSubmit">로그인</button>
       </form>
     </section>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="E.JS?v=20260529-18"></script>
+    <script src="E.JS?v=20260529-20"></script>
   </body>
 </html>

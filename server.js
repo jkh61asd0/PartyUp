@@ -19,7 +19,7 @@ const MIME_TYPES = {
 };
 
 function defaultData() {
-  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [], userAccounts: [] };
+  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], deletedAccountIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [], userAccounts: [] };
 }
 
 function readDatabase() {
@@ -34,6 +34,7 @@ function readDatabase() {
       deletedCommentIds: Array.isArray(data.deletedCommentIds) ? data.deletedCommentIds : [],
       deletedReportIds: Array.isArray(data.deletedReportIds) ? data.deletedReportIds : [],
       deletedBanIds: Array.isArray(data.deletedBanIds) ? data.deletedBanIds : [],
+      deletedAccountIds: Array.isArray(data.deletedAccountIds) ? data.deletedAccountIds : [],
       friendRequests: Array.isArray(data.friendRequests) ? data.friendRequests : [],
       friendships: Array.isArray(data.friendships) ? data.friendships : [],
       directMessages: data.directMessages && typeof data.directMessages === "object" && !Array.isArray(data.directMessages) ? data.directMessages : {},
@@ -120,13 +121,13 @@ function mergeById(current = [], incoming = []) {
   return [...merged.values()];
 }
 
-function mergeUserAccounts(current = [], incoming = []) {
+function mergeUserAccounts(current = [], incoming = [], deletedAccountIds = []) {
   const merged = new Map();
   current.forEach((account) => {
-    if (account?.loginId) merged.set(String(account.loginId).trim().toLowerCase(), account);
+    if (account?.loginId && !deletedAccountIds.includes(account.id)) merged.set(String(account.loginId).trim().toLowerCase(), account);
   });
   incoming.forEach((account) => {
-    if (!account?.loginId) return;
+    if (!account?.loginId || deletedAccountIds.includes(account.id)) return;
     const loginId = String(account.loginId).trim().toLowerCase();
     merged.set(loginId, { ...(merged.get(loginId) || {}), ...account, loginId });
   });
@@ -177,6 +178,7 @@ function normalizeInput(input = {}) {
     deletedCommentIds: Array.isArray(input.deletedCommentIds) ? input.deletedCommentIds : [],
     deletedReportIds: Array.isArray(input.deletedReportIds) ? input.deletedReportIds : [],
     deletedBanIds: Array.isArray(input.deletedBanIds) ? input.deletedBanIds : [],
+    deletedAccountIds: Array.isArray(input.deletedAccountIds) ? input.deletedAccountIds : [],
     friendRequests: Array.isArray(input.friendRequests) ? input.friendRequests : [],
     friendships: Array.isArray(input.friendships) ? input.friendships : [],
     directMessages: input.directMessages && typeof input.directMessages === "object" && !Array.isArray(input.directMessages) ? input.directMessages : {},
@@ -196,6 +198,7 @@ function mergeState(current, incoming = {}) {
   const deletedCommentIds = [...new Set([...(current.deletedCommentIds || []), ...normalizedIncoming.deletedCommentIds])];
   const deletedReportIds = [...new Set([...(current.deletedReportIds || []), ...normalizedIncoming.deletedReportIds])];
   const deletedBanIds = [...new Set([...(current.deletedBanIds || []), ...normalizedIncoming.deletedBanIds])];
+  const deletedAccountIds = [...new Set([...(current.deletedAccountIds || []), ...normalizedIncoming.deletedAccountIds])];
   return {
     recruits: Object.prototype.hasOwnProperty.call(incoming, "recruits") ? mergeRecruits(current.recruits, normalizedIncoming.recruits, deletedRecruitIds) : current.recruits.filter((recruit) => !deletedRecruitIds.includes(recruit.id)),
     rooms: mergeRooms(current.rooms, normalizedIncoming.rooms, deletedRoomIds),
@@ -205,6 +208,7 @@ function mergeState(current, incoming = {}) {
     deletedCommentIds,
     deletedReportIds,
     deletedBanIds,
+    deletedAccountIds,
     friendRequests: mergeById(current.friendRequests, normalizedIncoming.friendRequests),
     friendships: mergeById(current.friendships, normalizedIncoming.friendships),
     directMessages: mergeObjectMessageLists(current.directMessages, normalizedIncoming.directMessages),
@@ -214,7 +218,7 @@ function mergeState(current, incoming = {}) {
     lobbyMessages: mergeMessages(current.lobbyMessages, normalizedIncoming.lobbyMessages),
     reports: mergeById(current.reports, normalizedIncoming.reports).filter((report) => !deletedReportIds.includes(report.id)),
     bans: mergeById(current.bans, normalizedIncoming.bans).filter((ban) => !deletedBanIds.includes(ban.id)),
-    userAccounts: mergeUserAccounts(current.userAccounts, normalizedIncoming.userAccounts)
+    userAccounts: mergeUserAccounts(current.userAccounts, normalizedIncoming.userAccounts, deletedAccountIds)
   };
 }
 
