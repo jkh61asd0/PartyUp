@@ -2,7 +2,7 @@ const APP_STATE_ID = "partyup";
 const REDIS_KEY = "partyup:state";
 
 function defaultData() {
-  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
+  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
 }
 
 function normalizeData(input = {}) {
@@ -11,6 +11,10 @@ function normalizeData(input = {}) {
     rooms: input.rooms && typeof input.rooms === "object" && !Array.isArray(input.rooms) ? input.rooms : {},
     deletedRecruitIds: Array.isArray(input.deletedRecruitIds) ? input.deletedRecruitIds : [],
     deletedRoomIds: Array.isArray(input.deletedRoomIds) ? input.deletedRoomIds : [],
+    deletedBoardPostIds: Array.isArray(input.deletedBoardPostIds) ? input.deletedBoardPostIds : [],
+    deletedCommentIds: Array.isArray(input.deletedCommentIds) ? input.deletedCommentIds : [],
+    deletedReportIds: Array.isArray(input.deletedReportIds) ? input.deletedReportIds : [],
+    deletedBanIds: Array.isArray(input.deletedBanIds) ? input.deletedBanIds : [],
     friendRequests: Array.isArray(input.friendRequests) ? input.friendRequests : [],
     friendships: Array.isArray(input.friendships) ? input.friendships : [],
     directMessages: input.directMessages && typeof input.directMessages === "object" && !Array.isArray(input.directMessages) ? input.directMessages : {},
@@ -41,12 +45,27 @@ function mergeRooms(currentRooms = {}, incomingRooms = {}, deletedRoomIds = []) 
   Object.entries(incomingRooms || {}).forEach(([roomId, incomingRoom]) => {
     if (deletedRoomIds.includes(roomId)) return;
     const currentRoom = rooms[roomId] || {};
-    const kicked = [...new Set([...(currentRoom.kicked || []), ...(incomingRoom.kicked || [])])];
-    const participants = [...new Set([...(currentRoom.participants || []), ...(incomingRoom.participants || [])])].filter((nickname) => !kicked.includes(nickname));
+    const participantStatus = { ...(currentRoom.participantStatus || {}) };
+    [...(currentRoom.removedParticipants || [])].forEach((nickname) => {
+      if (!participantStatus[nickname]) participantStatus[nickname] = { state: "removed", at: "" };
+    });
+    [...(currentRoom.kicked || [])].forEach((nickname) => {
+      if (!participantStatus[nickname]) participantStatus[nickname] = { state: "kicked", at: "" };
+    });
+    Object.entries(incomingRoom.participantStatus || {}).forEach(([nickname, status]) => {
+      const previousTime = new Date(participantStatus[nickname]?.at || 0).getTime();
+      const nextTime = new Date(status?.at || 0).getTime();
+      if (!participantStatus[nickname] || nextTime >= previousTime) participantStatus[nickname] = status;
+    });
+    const kicked = Object.entries(participantStatus).filter(([, status]) => status?.state === "kicked").map(([nickname]) => nickname);
+    const removedParticipants = Object.entries(participantStatus).filter(([, status]) => status?.state === "removed").map(([nickname]) => nickname);
+    const participants = [...new Set([...(currentRoom.participants || []), ...(incomingRoom.participants || []), ...Object.entries(participantStatus).filter(([, status]) => status?.state === "active").map(([nickname]) => nickname)])].filter((nickname) => !kicked.includes(nickname) && !removedParticipants.includes(nickname));
     rooms[roomId] = {
       ...currentRoom,
       ...incomingRoom,
       participants,
+      participantStatus,
+      removedParticipants,
       kicked,
       messages: mergeMessages(currentRoom.messages, incomingRoom.messages)
     };
@@ -68,7 +87,12 @@ function mergeById(current = [], incoming = []) {
     if (item?.id) merged.set(item.id, item);
   });
   incoming.forEach((item) => {
-    if (item?.id) merged.set(item.id, { ...(merged.get(item.id) || {}), ...item });
+    if (!item?.id) return;
+    const previous = merged.get(item.id) || {};
+    const next = { ...previous, ...item };
+    if (["수락", "거절", "삭제", "허락", "나감", "강퇴", "처리됨"].includes(previous.status) && item.status === "대기") next.status = previous.status;
+    if (previous.deletedAt && !item.deletedAt) next.deletedAt = previous.deletedAt;
+    merged.set(item.id, next);
   });
   return [...merged.values()];
 }
@@ -90,24 +114,51 @@ function mergeRecruits(current = [], incoming = [], deletedRecruitIds = []) {
   return [...merged.values()];
 }
 
+function mergeBoardPosts(current = [], incoming = [], deletedBoardPostIds = [], deletedCommentIds = []) {
+  const merged = new Map();
+  current.forEach((post) => {
+    if (post?.id && !deletedBoardPostIds.includes(post.id)) merged.set(post.id, post);
+  });
+  incoming.forEach((post) => {
+    if (!post?.id || deletedBoardPostIds.includes(post.id)) return;
+    const previous = merged.get(post.id) || {};
+    merged.set(post.id, {
+      ...previous,
+      ...post,
+      messages: mergeById(previous.messages || [], post.messages || []).filter((message) => !deletedCommentIds.includes(message.id))
+    });
+  });
+  return [...merged.values()];
+}
+
 function mergeState(currentInput = {}, incomingInput = {}) {
   const current = normalizeData(currentInput);
   const incoming = incomingInput && typeof incomingInput === "object" ? incomingInput : {};
   const normalizedIncoming = normalizeData(incoming);
   const deletedRecruitIds = [...new Set([...current.deletedRecruitIds, ...normalizedIncoming.deletedRecruitIds])];
   const deletedRoomIds = [...new Set([...current.deletedRoomIds, ...normalizedIncoming.deletedRoomIds])];
+  const deletedBoardPostIds = [...new Set([...current.deletedBoardPostIds, ...normalizedIncoming.deletedBoardPostIds])];
+  const deletedCommentIds = [...new Set([...current.deletedCommentIds, ...normalizedIncoming.deletedCommentIds])];
+  const deletedReportIds = [...new Set([...current.deletedReportIds, ...normalizedIncoming.deletedReportIds])];
+  const deletedBanIds = [...new Set([...current.deletedBanIds, ...normalizedIncoming.deletedBanIds])];
   return {
     recruits: Object.prototype.hasOwnProperty.call(incoming, "recruits") ? mergeRecruits(current.recruits, normalizedIncoming.recruits, deletedRecruitIds) : current.recruits.filter((recruit) => !deletedRecruitIds.includes(recruit.id)),
     rooms: mergeRooms(current.rooms, normalizedIncoming.rooms, deletedRoomIds),
     deletedRecruitIds,
     deletedRoomIds,
+    deletedBoardPostIds,
+    deletedCommentIds,
+    deletedReportIds,
+    deletedBanIds,
     friendRequests: mergeById(current.friendRequests, normalizedIncoming.friendRequests),
     friendships: mergeById(current.friendships, normalizedIncoming.friendships),
     directMessages: mergeObjectMessageLists(current.directMessages, normalizedIncoming.directMessages),
-    boardPosts: Object.prototype.hasOwnProperty.call(incoming, "boardPosts") ? normalizedIncoming.boardPosts : current.boardPosts,
+    boardPosts: Object.prototype.hasOwnProperty.call(incoming, "boardPosts")
+      ? mergeBoardPosts(current.boardPosts, normalizedIncoming.boardPosts, deletedBoardPostIds, deletedCommentIds)
+      : current.boardPosts.filter((post) => !deletedBoardPostIds.includes(post.id)).map((post) => ({ ...post, messages: (post.messages || []).filter((message) => !deletedCommentIds.includes(message.id)) })),
     lobbyMessages: mergeMessages(current.lobbyMessages, normalizedIncoming.lobbyMessages),
-    reports: mergeById(current.reports, normalizedIncoming.reports),
-    bans: mergeById(current.bans, normalizedIncoming.bans)
+    reports: mergeById(current.reports, normalizedIncoming.reports).filter((report) => !deletedReportIds.includes(report.id)),
+    bans: mergeById(current.bans, normalizedIncoming.bans).filter((ban) => !deletedBanIds.includes(ban.id))
   };
 }
 

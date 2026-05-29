@@ -390,6 +390,10 @@ textarea {
   align-content: start;
 }
 
+.friend-request-panel {
+  margin-top: 14px;
+}
+
 .request-row {
   justify-content: space-between;
   padding: 8px;

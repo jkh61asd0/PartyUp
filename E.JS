@@ -49,6 +49,10 @@ const initialState = {
   rooms: {},
   deletedRecruitIds: [],
   deletedRoomIds: [],
+  deletedBoardPostIds: [],
+  deletedCommentIds: [],
+  deletedReportIds: [],
+  deletedBanIds: [],
   friendRequests: [],
   friendships: [],
   directMessages: {},
@@ -73,6 +77,7 @@ let sharedApiUrl = SHARED_API_URLS[0] || "";
 let sharedStateLoaded = !SHARED_API_URLS.length;
 let sharedSaveTimer = 0;
 let sharedSyncTimer = 0;
+let sharedLoadInFlight = false;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -101,6 +106,10 @@ function sharedStatePayload() {
     rooms: state.rooms,
     deletedRecruitIds: state.deletedRecruitIds,
     deletedRoomIds: state.deletedRoomIds,
+    deletedBoardPostIds: state.deletedBoardPostIds,
+    deletedCommentIds: state.deletedCommentIds,
+    deletedReportIds: state.deletedReportIds,
+    deletedBanIds: state.deletedBanIds,
     friendRequests: state.friendRequests,
     friendships: state.friendships,
     directMessages: state.directMessages,
@@ -118,6 +127,10 @@ function applySharedState(data) {
   state.rooms = data.rooms && typeof data.rooms === "object" && !Array.isArray(data.rooms) ? data.rooms : {};
   if (Array.isArray(data.deletedRecruitIds)) state.deletedRecruitIds = data.deletedRecruitIds;
   if (Array.isArray(data.deletedRoomIds)) state.deletedRoomIds = data.deletedRoomIds;
+  if (Array.isArray(data.deletedBoardPostIds)) state.deletedBoardPostIds = data.deletedBoardPostIds;
+  if (Array.isArray(data.deletedCommentIds)) state.deletedCommentIds = data.deletedCommentIds;
+  if (Array.isArray(data.deletedReportIds)) state.deletedReportIds = data.deletedReportIds;
+  if (Array.isArray(data.deletedBanIds)) state.deletedBanIds = data.deletedBanIds;
   if (Array.isArray(data.friendRequests)) state.friendRequests = data.friendRequests;
   if (Array.isArray(data.friendships)) state.friendships = data.friendships;
   state.directMessages = data.directMessages && typeof data.directMessages === "object" && !Array.isArray(data.directMessages) ? data.directMessages : {};
@@ -145,7 +158,9 @@ function normalizeRoom(room = {}) {
   return {
     ...clone(initialState.room),
     ...room,
+    participantStatus: room.participantStatus && typeof room.participantStatus === "object" && !Array.isArray(room.participantStatus) ? room.participantStatus : {},
     participants: Array.isArray(room.participants) ? [...new Set(room.participants.filter(Boolean))] : [],
+    removedParticipants: Array.isArray(room.removedParticipants) ? [...new Set(room.removedParticipants.filter(Boolean))] : [],
     kicked: Array.isArray(room.kicked) ? [...new Set(room.kicked.filter(Boolean))] : [],
     messages: Array.isArray(room.messages) ? room.messages.slice(-300) : []
   };
@@ -155,6 +170,10 @@ function syncCurrentRoomFromShared() {
   state.rooms = state.rooms && typeof state.rooms === "object" && !Array.isArray(state.rooms) ? state.rooms : {};
   state.deletedRecruitIds = Array.isArray(state.deletedRecruitIds) ? state.deletedRecruitIds : [];
   state.deletedRoomIds = Array.isArray(state.deletedRoomIds) ? state.deletedRoomIds : [];
+  state.deletedBoardPostIds = Array.isArray(state.deletedBoardPostIds) ? state.deletedBoardPostIds : [];
+  state.deletedCommentIds = Array.isArray(state.deletedCommentIds) ? state.deletedCommentIds : [];
+  state.deletedReportIds = Array.isArray(state.deletedReportIds) ? state.deletedReportIds : [];
+  state.deletedBanIds = Array.isArray(state.deletedBanIds) ? state.deletedBanIds : [];
   if (!state.currentRoomId) return;
   const sharedRoom = state.rooms[state.currentRoomId];
   const recruit = state.recruits.find((item) => item.id === state.currentRoomId);
@@ -194,6 +213,8 @@ function updateSharedRoom(mutator) {
 
 async function loadSharedState(silent = false) {
   if (!SHARED_API_URLS.length) return;
+  if (sharedLoadInFlight) return;
+  sharedLoadInFlight = true;
   for (const url of SHARED_API_URLS) {
     try {
       const response = await fetch(url, { cache: "no-store" });
@@ -202,17 +223,19 @@ async function loadSharedState(silent = false) {
       applySharedState(await response.json());
       sharedStateLoaded = true;
       renderAll(false);
+      sharedLoadInFlight = false;
       return;
     } catch {
       sharedStateLoaded = false;
     }
   }
+  sharedLoadInFlight = false;
   if (!silent) showToast("공유 서버에 연결할 수 없어 이 브라우저에만 저장됩니다.");
 }
 
 function startSharedSync() {
   if (!SHARED_API_URLS.length || sharedSyncTimer) return;
-  sharedSyncTimer = window.setInterval(() => loadSharedState(true), 3500);
+  sharedSyncTimer = window.setInterval(() => loadSharedState(true), 500);
 }
 
 function saveSharedState() {
@@ -323,13 +346,13 @@ function normalizeFriendData() {
 
 function friendshipWith(nickname) {
   const me = displayName();
-  return state.friendships.find((friendship) => friendship.users.includes(me) && friendship.users.includes(nickname));
+  return state.friendships.find((friendship) => !friendship.deletedAt && friendship.users.includes(me) && friendship.users.includes(nickname));
 }
 
 function friendNicknames() {
   const me = displayName();
   return state.friendships
-    .filter((friendship) => friendship.users.includes(me))
+    .filter((friendship) => !friendship.deletedAt && friendship.users.includes(me))
     .map((friendship) => friendship.users.find((nickname) => nickname !== me))
     .filter(Boolean);
 }
@@ -438,7 +461,7 @@ function canInteractWithRecruit(recruit) {
   if (ban) return { ok: false, reason: banMessage(ban) };
   if (recruit.owner === displayName()) return { ok: false, reason: "내 방에는 신청할 수 없습니다." };
   if (state.currentRoomId && state.currentRoomId !== recruit.id) return { ok: false, reason: "이미 다른 방에 있어서 신청할 수 없습니다." };
-  if (recruit.requests.some((request) => request.nickname === displayName())) return { ok: false, reason: "이미 신청한 방입니다." };
+  if (recruit.requests.some((request) => request.nickname === displayName() && ["대기", "허락"].includes(request.status))) return { ok: false, reason: "이미 신청한 방입니다." };
   return { ok: true };
 }
 
@@ -504,8 +527,9 @@ function renderRecruitCard(item) {
     }
     return `<button class="primary-button" data-join-room="${item.id}" ${disabled}>비번 입장</button>`;
   })();
-  const requestRows = item.requests.length
-    ? item.requests
+  const visibleRequests = item.requests.filter((request) => !["나감", "강퇴", "삭제"].includes(request.status));
+  const requestRows = visibleRequests.length
+    ? visibleRequests
         .map((request) => {
           const canManage = item.owner === displayName();
           const controls =
@@ -586,7 +610,7 @@ function renderFriends() {
         <article class="friend">
           <div class="friend-main">
             <strong>${escapeHtml(request.from)}</strong>
-            <span>친구 요청을 보냈습니다.</span>
+            <span>친구 요청을 받았습니다.</span>
           </div>
           <div class="mini-actions">
             <button class="ghost-button" data-accept-friend="${escapeHtml(request.id)}">수락</button>
@@ -600,15 +624,12 @@ function renderFriends() {
     ? outgoing.map((request) => `<div class="simple-item"><strong>${escapeHtml(request.to)}</strong><span class="subtle">수락 대기중</span></div>`).join("")
     : '<div class="empty">보낸 친구 요청이 없습니다.</div>';
 
-  $("#friendList").innerHTML = `
-    <div class="simple-list">
-      <h3 class="inline-title">친구</h3>
-      ${friendRows}
-      <h3 class="inline-title">받은 요청</h3>
-      ${incomingRows}
-      <h3 class="inline-title">보낸 요청</h3>
-      ${outgoingRows}
-    </div>`;
+  $("#friendList").innerHTML = friendRows;
+  $("#friendRequestList").innerHTML = `
+    <h3 class="inline-title">받은 요청</h3>
+    ${incomingRows}
+    <h3 class="inline-title">보낸 신청</h3>
+    ${outgoingRows}`;
   renderDm();
 }
 
@@ -907,7 +928,7 @@ function acceptFriendRequest(requestId) {
   if (!request) return;
   request.status = "수락";
   const key = friendPairKey(request.from, request.to);
-  if (!state.friendships.some((friendship) => friendPairKey(...friendship.users) === key)) {
+  if (!state.friendships.some((friendship) => !friendship.deletedAt && friendPairKey(...friendship.users) === key)) {
     state.friendships.unshift({ id: `fs${Date.now()}`, users: [request.from, request.to], createdAt: new Date().toISOString() });
   }
   if (!state.directMessages[key]) state.directMessages[key] = [];
@@ -928,8 +949,12 @@ function removeFriend(nickname) {
   normalizeFriendData();
   if (!confirm(`${nickname}님을 친구에서 삭제할까요?`)) return;
   const key = friendPairKey(displayName(), nickname);
-  state.friendships = state.friendships.filter((friendship) => friendPairKey(...friendship.users) !== key);
-  state.friendRequests = state.friendRequests.filter((request) => friendPairKey(request.from, request.to) !== key);
+  state.friendships.forEach((friendship) => {
+    if (friendPairKey(...friendship.users) === key) friendship.deletedAt = new Date().toISOString();
+  });
+  state.friendRequests.forEach((request) => {
+    if (friendPairKey(request.from, request.to) === key && request.status === "대기") request.status = "삭제";
+  });
   if (state.selectedFriendId === nickname) state.selectedFriendId = "";
   renderAll();
   showToast("친구를 삭제했습니다.");
@@ -966,6 +991,8 @@ function banUser(target, duration, reportId = "") {
   const previousBan = activeBanFor(target);
   if (previousBan && !confirm("이미 정지된 닉네임입니다. 새 정지로 갱신할까요?")) return;
 
+  const replacedBanIds = state.bans.filter((ban) => ban.nickname === target).map((ban) => ban.id).filter(Boolean);
+  state.deletedBanIds = [...new Set([...(state.deletedBanIds || []), ...replacedBanIds])];
   state.bans = state.bans.filter((ban) => ban.nickname !== target);
   state.bans.unshift({
     id: `ban${Date.now()}${Math.random().toString(16).slice(2)}`,
@@ -986,6 +1013,7 @@ function banUser(target, duration, reportId = "") {
 
 function unbanUser(banId) {
   state.bans = state.bans.filter((ban) => ban.id !== banId);
+  state.deletedBanIds = [...new Set([...(state.deletedBanIds || []), banId])];
   renderAll();
   showToast("정지를 해제했습니다.");
 }
@@ -1015,10 +1043,14 @@ function kickRoomParticipant(nickname) {
   if (!confirm(`${nickname}님을 이 방에서 강퇴할까요?`)) return;
   const recruit = state.recruits.find((item) => item.id === state.currentRoomId);
   if (recruit) {
-    recruit.requests = recruit.requests.filter((request) => request.nickname !== nickname);
+    recruit.requests.forEach((request) => {
+      if (request.nickname === nickname) request.status = "강퇴";
+    });
   }
   updateSharedRoom((room) => {
     room.participants = room.participants.filter((participant) => participant !== nickname);
+    room.participantStatus = { ...(room.participantStatus || {}), [nickname]: { state: "kicked", at: new Date().toISOString() } };
+    room.removedParticipants = [...new Set([...(room.removedParticipants || []), nickname])];
     room.kicked = [...new Set([...(room.kicked || []), nickname])];
     room.messages.push({ id: `m${Date.now()}`, from: "시스템", text: `${nickname}님이 강퇴되었습니다.`, createdAt: new Date().toISOString() });
   });
@@ -1067,6 +1099,11 @@ function joinRecruitRoom(recruit) {
     password: recruit.password || "",
     intro: recruit.intro || "",
     participants: [...new Set([...(existingRoom?.participants || []), ...participants])],
+    participantStatus: {
+      ...(existingRoom?.participantStatus || {}),
+      ...Object.fromEntries(participants.map((nickname) => [nickname, { state: "active", at: new Date().toISOString() }]))
+    },
+    removedParticipants: (existingRoom?.removedParticipants || []).filter((nickname) => !participants.includes(nickname)),
     messages: existingRoom?.messages?.length ? existingRoom.messages : [{ id: `m${Date.now()}`, from: recruit.owner, text: `${recruit.game} 파티에 오신 걸 환영합니다.`, createdAt: new Date().toISOString() }]
   });
   state.rooms[recruit.id] = state.room;
@@ -1278,6 +1315,7 @@ function bindEvents() {
       mode: recruit.mode,
       password: recruit.password,
       participants: [displayName()],
+      participantStatus: { [displayName()]: { state: "active", at: new Date().toISOString() } },
       messages: []
     };
     state.rooms[id] = normalizeRoom(state.room);
@@ -1315,11 +1353,17 @@ function bindEvents() {
       if (request) {
         request.status = target.dataset.approve ? "허락" : "거절";
         if (request.status === "허락" && state.currentRoomId === recruitId && !state.room.participants.includes(request.nickname)) {
-          updateSharedRoom((room) => room.participants.push(request.nickname));
+          updateSharedRoom((room) => {
+            room.participantStatus = { ...(room.participantStatus || {}), [request.nickname]: { state: "active", at: new Date().toISOString() } };
+            room.removedParticipants = (room.removedParticipants || []).filter((nickname) => nickname !== request.nickname);
+            room.participants.push(request.nickname);
+          });
         }
         if (request.status === "거절") {
           updateSharedRoom((room) => {
             room.participants = room.participants.filter((nickname) => nickname !== request.nickname);
+            room.participantStatus = { ...(room.participantStatus || {}), [request.nickname]: { state: "removed", at: new Date().toISOString() } };
+            room.removedParticipants = [...new Set([...(room.removedParticipants || []), request.nickname])];
           });
         }
       }
@@ -1380,6 +1424,7 @@ function bindEvents() {
       }
       if (!confirm("이 게시글을 삭제할까요?")) return;
       state.boardPosts = state.boardPosts.filter((item) => item.id !== post.id);
+      state.deletedBoardPostIds = [...new Set([...(state.deletedBoardPostIds || []), post.id])];
       if (state.selectedThreadId === post.id) state.selectedThreadId = "";
       renderBoard();
       saveState();
@@ -1412,6 +1457,7 @@ function bindEvents() {
       }
       if (!confirm("이 댓글을 삭제할까요?")) return;
       post.messages = post.messages.filter((item) => item.id !== commentId);
+      state.deletedCommentIds = [...new Set([...(state.deletedCommentIds || []), commentId])];
       renderBoard();
       saveState();
       showToast("댓글을 삭제했습니다.");
@@ -1581,10 +1627,14 @@ function bindEvents() {
       return;
     }
     if (recruit) {
-      recruit.requests = recruit.requests.filter((request) => request.nickname !== displayName());
+      recruit.requests.forEach((request) => {
+        if (request.nickname === displayName()) request.status = "나감";
+      });
     }
     updateSharedRoom((room) => {
       room.participants = room.participants.filter((nickname) => nickname !== displayName());
+      room.participantStatus = { ...(room.participantStatus || {}), [displayName()]: { state: "removed", at: new Date().toISOString() } };
+      room.removedParticipants = [...new Set([...(room.removedParticipants || []), displayName()])];
     });
     state.currentRoomId = "";
     state.room = blankRoom();
@@ -1609,6 +1659,7 @@ function bindEvents() {
   $("#clearSafety").addEventListener("click", () => {
     if (!confirm("신고 및 차단 기록을 모두 정리할까요?")) return;
     state.blocked = [];
+    state.deletedReportIds = [...new Set([...(state.deletedReportIds || []), ...state.reports.map((report) => report.id).filter(Boolean)])];
     state.reports = [];
     renderAll();
   });
