@@ -1,5 +1,5 @@
 const STORAGE_KEY = "partyup-state-v3";
-const ADMIN_CODE = "1234";
+const ADMIN_CODE = "0409";
 
 function sharedApiUrls() {
   if (window.location.protocol === "file:") return [];
@@ -1304,7 +1304,7 @@ async function requestMicPermission() {
 
 function bindEvents() {
   $$(".nav-item").forEach((button) =>
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       if (button.dataset.view === "admin" && !state.isAdmin) {
         const code = prompt("관리자 코드를 입력하세요.");
         if (code !== ADMIN_CODE) {
@@ -1312,7 +1312,13 @@ function bindEvents() {
           return;
         }
         state.isAdmin = true;
-        saveState();
+        saveState(false);
+      }
+      if (button.dataset.view === "admin") {
+        await waitForSharedLoad();
+        await loadSharedState(true);
+        normalizeUserAccounts();
+        renderAdmin();
       }
       setView(button.dataset.view);
     })

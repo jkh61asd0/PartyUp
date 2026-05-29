@@ -309,6 +309,10 @@ label {
   font-weight: 800;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 input,
 select,
 textarea {
