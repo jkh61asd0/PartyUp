@@ -19,7 +19,7 @@ const MIME_TYPES = {
 };
 
 function defaultData() {
-  return { recruits: [], boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
+  return { recruits: [], rooms: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
 }
 
 function readDatabase() {
@@ -27,6 +27,7 @@ function readDatabase() {
     const data = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
     return {
       recruits: Array.isArray(data.recruits) ? data.recruits : [],
+      rooms: data.rooms && typeof data.rooms === "object" && !Array.isArray(data.rooms) ? data.rooms : {},
       boardPosts: Array.isArray(data.boardPosts) ? data.boardPosts : [],
       lobbyMessages: Array.isArray(data.lobbyMessages) ? data.lobbyMessages : [],
       reports: Array.isArray(data.reports) ? data.reports : [],
@@ -75,6 +76,7 @@ async function handleApi(req, res) {
     const input = JSON.parse(await readBody(req));
     const nextData = {
       recruits: Array.isArray(input.recruits) ? input.recruits : [],
+      rooms: input.rooms && typeof input.rooms === "object" && !Array.isArray(input.rooms) ? input.rooms : {},
       boardPosts: Array.isArray(input.boardPosts) ? input.boardPosts : [],
       lobbyMessages: Array.isArray(input.lobbyMessages) ? input.lobbyMessages : [],
       reports: Array.isArray(input.reports) ? input.reports : [],

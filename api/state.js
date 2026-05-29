@@ -2,12 +2,13 @@ const APP_STATE_ID = "partyup";
 const REDIS_KEY = "partyup:state";
 
 function defaultData() {
-  return { recruits: [], boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
+  return { recruits: [], rooms: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
 }
 
 function normalizeData(input = {}) {
   return {
     recruits: Array.isArray(input.recruits) ? input.recruits : [],
+    rooms: input.rooms && typeof input.rooms === "object" && !Array.isArray(input.rooms) ? input.rooms : {},
     boardPosts: Array.isArray(input.boardPosts) ? input.boardPosts : [],
     lobbyMessages: Array.isArray(input.lobbyMessages) ? input.lobbyMessages : [],
     reports: Array.isArray(input.reports) ? input.reports : [],

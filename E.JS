@@ -4,7 +4,8 @@ const ADMIN_CODE = "1234";
 function sharedApiUrls() {
   if (window.location.protocol === "file:") return [];
   const urls = ["/api/state"];
-  if (window.location.port !== "3000") {
+  const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+  if (isLocalHost && window.location.port !== "3000") {
     urls.push(`${window.location.protocol}//${window.location.hostname}:3000/api/state`);
   }
   return [...new Set(urls)];
@@ -45,6 +46,7 @@ const initialState = {
   reports: [],
   bans: [],
   recruits: [],
+  rooms: {},
   friends: [],
   dms: {},
   boardPosts: [],
@@ -91,6 +93,7 @@ function saveState(syncShared = true) {
 function sharedStatePayload() {
   return {
     recruits: state.recruits,
+    rooms: state.rooms,
     boardPosts: state.boardPosts,
     lobbyMessages: state.lobbyMessages,
     reports: state.reports,
@@ -102,6 +105,7 @@ function applySharedState(data) {
   if (!data || typeof data !== "object") return;
   const previousLobbyId = state.lobbyMessages.at(-1)?.id || "";
   if (Array.isArray(data.recruits)) state.recruits = data.recruits;
+  state.rooms = data.rooms && typeof data.rooms === "object" && !Array.isArray(data.rooms) ? data.rooms : {};
   if (Array.isArray(data.boardPosts)) state.boardPosts = data.boardPosts;
   if (Array.isArray(data.lobbyMessages)) state.lobbyMessages = data.lobbyMessages;
   if (Array.isArray(data.reports)) state.reports = data.reports;
@@ -109,11 +113,59 @@ function applySharedState(data) {
   normalizeBoardPosts();
   normalizeLobbyMessages();
   normalizeAdminData();
+  syncCurrentRoomFromShared();
   const nextLobbyMessage = state.lobbyMessages.at(-1);
   if (sharedStateLoaded && currentSettings().soundCue && nextLobbyMessage?.id !== previousLobbyId && nextLobbyMessage?.from !== displayName()) {
     playSoundCue();
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function blankRoom() {
+  return { ...clone(initialState.room), participants: [displayName()] };
+}
+
+function normalizeRoom(room = {}) {
+  return {
+    ...clone(initialState.room),
+    ...room,
+    participants: Array.isArray(room.participants) ? [...new Set(room.participants.filter(Boolean))] : [],
+    messages: Array.isArray(room.messages) ? room.messages.slice(-300) : []
+  };
+}
+
+function syncCurrentRoomFromShared() {
+  state.rooms = state.rooms && typeof state.rooms === "object" && !Array.isArray(state.rooms) ? state.rooms : {};
+  if (!state.currentRoomId) return;
+  const sharedRoom = state.rooms[state.currentRoomId];
+  const recruit = state.recruits.find((item) => item.id === state.currentRoomId);
+  if (!sharedRoom && !recruit) {
+    state.currentRoomId = "";
+    state.room = blankRoom();
+    return;
+  }
+  if (sharedRoom) {
+    state.room = normalizeRoom(sharedRoom);
+  }
+}
+
+function currentSharedRoom() {
+  if (!state.currentRoomId) return null;
+  state.rooms = state.rooms && typeof state.rooms === "object" && !Array.isArray(state.rooms) ? state.rooms : {};
+  const room = normalizeRoom(state.rooms[state.currentRoomId] || state.room);
+  room.recruitId = state.currentRoomId;
+  state.rooms[state.currentRoomId] = room;
+  state.room = room;
+  return room;
+}
+
+function updateSharedRoom(mutator) {
+  const room = currentSharedRoom();
+  if (!room) return null;
+  mutator(room);
+  state.rooms[state.currentRoomId] = normalizeRoom(room);
+  state.room = state.rooms[state.currentRoomId];
+  return state.room;
 }
 
 async function loadSharedState(silent = false) {
@@ -247,6 +299,7 @@ function avatarText(name = displayName()) {
 
 function syncMyIdentity() {
   const name = displayName();
+  state.rooms = state.rooms && typeof state.rooms === "object" && !Array.isArray(state.rooms) ? state.rooms : {};
   state.room = {
     recruitId: "",
     title: "내 파티 방",
@@ -260,6 +313,13 @@ function syncMyIdentity() {
   };
   if (!state.room.participants.length) state.room.participants = [name];
   state.room.participants = state.room.participants.map((participant) => (participant === "치킨플레이어" || participant === "게스트" ? name : participant));
+  if (state.currentRoomId && state.rooms[state.currentRoomId]) {
+    state.rooms[state.currentRoomId] = normalizeRoom({
+      ...state.rooms[state.currentRoomId],
+      participants: state.rooms[state.currentRoomId].participants.map((participant) => (participant === "치킨플레이어" || participant === "게스트" ? name : participant))
+    });
+    state.room = state.rooms[state.currentRoomId];
+  }
 }
 
 function activeBans() {
@@ -791,9 +851,10 @@ function deleteRecruitRoom(recruitId) {
   }
   if (!confirm("이 방을 삭제할까요? 모집글과 현재 방 정보가 함께 삭제됩니다.")) return;
   state.recruits = state.recruits.filter((item) => item.id !== recruitId);
+  if (state.rooms) delete state.rooms[recruitId];
   if (state.currentRoomId === recruitId) {
     state.currentRoomId = "";
-    state.room = { ...clone(initialState.room), participants: [displayName()] };
+    state.room = blankRoom();
   }
   renderAll();
   setView("recruit");
@@ -825,8 +886,21 @@ function joinRecruitRoom(recruit) {
   state.room.mode = recruit.mode;
   state.room.password = recruit.password || "";
   state.room.intro = recruit.intro || "";
-  state.room.participants = [...new Set([displayName(), recruit.owner, ...recruit.requests.filter((request) => request.status === "허락").map((request) => request.nickname)])];
-  state.room.messages.unshift({ from: recruit.owner, text: `${recruit.game} 파티에 오신 걸 환영합니다.` });
+  const participants = [displayName(), recruit.owner, ...recruit.requests.filter((request) => request.status === "허락").map((request) => request.nickname)];
+  const existingRoom = state.rooms?.[recruit.id];
+  state.room = normalizeRoom({
+    ...state.room,
+    ...(existingRoom || {}),
+    recruitId: recruit.id,
+    title: recruit.title,
+    owner: recruit.owner,
+    mode: recruit.mode,
+    password: recruit.password || "",
+    intro: recruit.intro || "",
+    participants: [...new Set([...(existingRoom?.participants || []), ...participants])],
+    messages: existingRoom?.messages?.length ? existingRoom.messages : [{ id: `m${Date.now()}`, from: recruit.owner, text: `${recruit.game} 파티에 오신 걸 환영합니다.`, createdAt: new Date().toISOString() }]
+  });
+  state.rooms[recruit.id] = state.room;
   renderAll();
   setView("room");
   showToast("방에 입장했습니다.");
@@ -879,6 +953,13 @@ function bindEvents() {
     state = clone(initialState);
     renderAll();
     showToast("데이터를 초기화했습니다.");
+  });
+
+  $("#refreshButton").addEventListener("click", async () => {
+    await loadSharedState(false);
+    syncCurrentRoomFromShared();
+    renderAll(false);
+    showToast("새로고침 완료");
   });
 
   $("#loginForm").addEventListener("submit", (event) => {
@@ -1002,6 +1083,7 @@ function bindEvents() {
       participants: [displayName()],
       messages: []
     };
+    state.rooms[id] = normalizeRoom(state.room);
     event.currentTarget.reset();
     renderAll();
     setView("room");
@@ -1036,10 +1118,12 @@ function bindEvents() {
       if (request) {
         request.status = target.dataset.approve ? "허락" : "거절";
         if (request.status === "허락" && state.currentRoomId === recruitId && !state.room.participants.includes(request.nickname)) {
-          state.room.participants.push(request.nickname);
+          updateSharedRoom((room) => room.participants.push(request.nickname));
         }
         if (request.status === "거절") {
-          state.room.participants = state.room.participants.filter((nickname) => nickname !== request.nickname);
+          updateSharedRoom((room) => {
+            room.participants = room.participants.filter((nickname) => nickname !== request.nickname);
+          });
         }
       }
       renderRecruitList();
@@ -1247,17 +1331,27 @@ function bindEvents() {
       showToast("비번 입장 방은 비밀번호가 필요합니다.");
       return;
     }
-    state.room.title = data.title.trim();
-    state.room.mode = data.mode;
-    state.room.password = data.mode === "비번 입장" ? data.password.trim() : "";
-    state.room.intro = data.intro.trim();
+    const nextTitle = data.title.trim();
+    const nextMode = data.mode;
+    const nextPassword = data.mode === "비번 입장" ? data.password.trim() : "";
+    const nextIntro = data.intro.trim();
+    state.room.title = nextTitle;
+    state.room.mode = nextMode;
+    state.room.password = nextPassword;
+    state.room.intro = nextIntro;
     const recruit = state.recruits.find((item) => item.id === state.room.recruitId);
     if (recruit && recruit.owner === displayName()) {
-      recruit.title = state.room.title;
-      recruit.mode = state.room.mode;
-      recruit.password = state.room.password;
-      recruit.intro = state.room.intro;
+      recruit.title = nextTitle;
+      recruit.mode = nextMode;
+      recruit.password = nextPassword;
+      recruit.intro = nextIntro;
     }
+    updateSharedRoom((room) => {
+      room.title = nextTitle;
+      room.mode = nextMode;
+      room.password = nextPassword;
+      room.intro = nextIntro;
+    });
     renderAll();
     setView("room");
     saveState();
@@ -1282,8 +1376,11 @@ function bindEvents() {
     if (recruit) {
       recruit.requests = recruit.requests.filter((request) => request.nickname !== displayName());
     }
+    updateSharedRoom((room) => {
+      room.participants = room.participants.filter((nickname) => nickname !== displayName());
+    });
     state.currentRoomId = "";
-    state.room = { ...clone(initialState.room), participants: [displayName()] };
+    state.room = blankRoom();
     renderAll();
     showToast("방에서 나갔습니다.");
     setView("recruit");
@@ -1294,7 +1391,9 @@ function bindEvents() {
     if (!guardNotBanned()) return;
     const text = $("#roomInput").value.trim();
     if (!text) return;
-    state.room.messages.push({ from: "me", text });
+    updateSharedRoom((room) => {
+      room.messages.push({ id: `m${Date.now()}`, from: displayName(), text, createdAt: new Date().toISOString() });
+    });
     $("#roomInput").value = "";
     renderRoom();
     saveState();

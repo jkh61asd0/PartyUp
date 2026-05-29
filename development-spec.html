@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PartyUp 개발 명세서</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, "Noto Sans KR", sans-serif;
+        background: #f5f7fb;
+        color: #172033;
+        line-height: 1.6;
+      }
+
+      main {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 48px 20px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 32px;
+      }
+
+      .summary {
+        margin: 0 0 28px;
+        color: #536078;
+        font-size: 18px;
+      }
+
+      section {
+        background: #ffffff;
+        border: 1px solid #dfe5ef;
+        border-radius: 8px;
+        padding: 22px;
+        margin-bottom: 16px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .tag {
+        display: inline-block;
+        margin: 4px 6px 0 0;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #e9eef8;
+        color: #284066;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>PartyUp 개발 명세서</h1>
+      <p class="summary">게임을 같이 할 사람을 모집하고, 채팅과 게시판으로 소통하는 게임 매칭 SNS 웹앱</p>
+
+      <section>
+        <h2>1. 한 줄 요약</h2>
+        <p>PartyUp은 게임별 파티 모집, 친구, 채팅, 게시판, 신고 관리를 한 화면에서 제공하는 웹 서비스입니다.</p>
+      </section>
+
+      <section>
+        <h2>2. 주요 기능</h2>
+        <ul>
+          <li>닉네임 기반 로그인 및 프로필 설정</li>
+          <li>게임, 나이, 성별, 마이크 여부로 파티 모집글 필터링</li>
+          <li>파티 모집글 작성, 참여, 방 채팅, 방 설정</li>
+          <li>친구 추가 및 개인 메시지</li>
+          <li>게임별 게시판, 게시글 작성, 댓글 작성</li>
+          <li>전체 로비 채팅</li>
+          <li>사용자 차단, 신고, 관리자 제재 목록 관리</li>
+          <li>테마, 화면 밀도, 채팅 표시 방식 등 사용자 설정</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>3. 기술 조건</h2>
+        <p>
+          <span class="tag">HTML</span>
+          <span class="tag">CSS</span>
+          <span class="tag">JavaScript</span>
+          <span class="tag">Node.js</span>
+          <span class="tag">Vercel API</span>
+          <span class="tag">Supabase 또는 Upstash Redis</span>
+        </p>
+        <ul>
+          <li>프론트엔드는 단일 페이지 방식으로 화면을 전환합니다.</li>
+          <li>개인 설정은 브라우저 localStorage에 저장합니다.</li>
+          <li>공유 데이터는 /api/state API로 저장하고 불러옵니다.</li>
+          <li>로컬 실행 시 Node.js 서버와 db.json을 사용할 수 있습니다.</li>
+          <li>배포 환경에서는 Supabase 또는 Upstash Redis를 저장소로 사용할 수 있습니다.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>4. 데이터 구조</h2>
+        <ul>
+          <li>recruits: 파티 모집글 목록</li>
+          <li>boardPosts: 게시판 글과 댓글</li>
+          <li>lobbyMessages: 전체 채팅 메시지</li>
+          <li>reports: 신고 기록</li>
+          <li>bans: 관리자 제재 기록</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>5. 앞으로 더 추가할 방향</h2>
+        <ul>
+          <li>실제 회원가입과 계정 인증 기능 추가</li>
+          <li>실시간 채팅 성능 개선</li>
+          <li>게임별 랭크, 포지션, 플레이 시간 조건 추가</li>
+          <li>모바일 화면 최적화와 알림 기능 강화</li>
+          <li>관리자 권한과 신고 처리 절차 세분화</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
