@@ -1,4 +1,5 @@
 const STORAGE_KEY = "partyup-state-v3";
+const SHARED_API_URL = window.location.protocol === "file:" ? "" : "/api/state";
 
 const games = ["리그 오브 레전드", "발로란트", "오버워치 2", "배틀그라운드", "로스트아크", "메이플스토리"];
 
@@ -39,6 +40,8 @@ const initialState = {
 };
 
 let state = loadState();
+let sharedStateLoaded = !SHARED_API_URL;
+let sharedSaveTimer = 0;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -58,6 +61,52 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  saveSharedState();
+}
+
+function sharedStatePayload() {
+  return {
+    recruits: state.recruits,
+    boardPosts: state.boardPosts
+  };
+}
+
+function applySharedState(data) {
+  if (!data || typeof data !== "object") return;
+  if (Array.isArray(data.recruits)) state.recruits = data.recruits;
+  if (Array.isArray(data.boardPosts)) state.boardPosts = data.boardPosts;
+  normalizeBoardPosts();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+async function loadSharedState() {
+  if (!SHARED_API_URL) return;
+  try {
+    const response = await fetch(SHARED_API_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error("Shared state request failed");
+    applySharedState(await response.json());
+    sharedStateLoaded = true;
+    renderAll();
+  } catch {
+    sharedStateLoaded = false;
+    showToast("공유 서버에 연결할 수 없어 이 브라우저에만 저장됩니다.");
+  }
+}
+
+function saveSharedState() {
+  if (!SHARED_API_URL || !sharedStateLoaded) return;
+  window.clearTimeout(sharedSaveTimer);
+  sharedSaveTimer = window.setTimeout(async () => {
+    try {
+      await fetch(SHARED_API_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sharedStatePayload())
+      });
+    } catch {
+      showToast("공유 서버 저장에 실패했습니다.");
+    }
+  }, 250);
 }
 
 function escapeHtml(value) {
@@ -924,3 +973,4 @@ fillGameSelect($("#loginGame"));
 fillGameSelect($("#profileGame"));
 bindEvents();
 renderAll();
+loadSharedState();
