@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PartyUp - 게임 매칭 SNS</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">PU</div>
+          <div>
+            <strong>PartyUp</strong>
+            <span>게임 매칭 SNS</span>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="주요 화면">
+          <button class="nav-item active" data-view="recruit">모집</button>
+          <button class="nav-item" data-view="create">글 작성</button>
+          <button class="nav-item" data-view="friends">친구</button>
+          <button class="nav-item" data-view="board">게시판</button>
+          <button class="nav-item" data-view="room">방</button>
+          <button class="nav-item" data-view="safety">신고/차단</button>
+          <button class="nav-item" data-view="profile">프로필 설정</button>
+        </nav>
+
+        <section class="profile-panel">
+          <div class="avatar" id="myAvatar">나</div>
+          <div>
+            <strong id="myNickname">치킨플레이어</strong>
+            <span id="myStatus">온라인 · 매칭 가능</span>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">실시간 파티 매칭</p>
+            <h1 id="viewTitle">모집 화면</h1>
+          </div>
+          <div class="top-actions">
+            <button class="ghost-button" id="seedButton">데이터 초기화</button>
+            <button class="primary-button" data-go="create">모집 글 작성</button>
+          </div>
+        </header>
+
+        <section class="view active" id="recruitView">
+          <form class="filter-grid" id="filterForm">
+            <label>성별
+              <select name="gender">
+                <option value="">전체</option>
+                <option>남성</option>
+                <option>여성</option>
+                <option>무관</option>
+              </select>
+            </label>
+            <label>나이
+              <select name="age">
+                <option value="">전체</option>
+                <option value="10">10대</option>
+                <option value="20">20대</option>
+                <option value="30">30대</option>
+                <option value="40">40대 이상</option>
+              </select>
+            </label>
+            <label>게임
+              <select name="game" id="filterGame"></select>
+            </label>
+            <label>인원수
+              <select name="partySize">
+                <option value="">전체</option>
+                <option value="2">2명 이상</option>
+                <option value="3">3명 이상</option>
+                <option value="4">4명 이상</option>
+                <option value="5">5명 이상</option>
+              </select>
+            </label>
+            <label>마이크
+              <select name="mic">
+                <option value="">전체</option>
+                <option value="true">사용</option>
+                <option value="false">미사용</option>
+              </select>
+            </label>
+          </form>
+          <div class="list-header">
+            <strong id="recruitCount">0개 모집</strong>
+            <button class="ghost-button" id="clearFilters">필터 초기화</button>
+          </div>
+          <div class="recruit-list" id="recruitList"></div>
+        </section>
+
+        <section class="view" id="createView">
+          <form class="editor" id="createForm">
+            <div class="form-row">
+              <label>방 제목
+                <input name="title" required maxlength="35" placeholder="예: 랭크 듀오 한 명 구해요" />
+              </label>
+              <label>게임
+                <select name="game" id="createGame" required></select>
+              </label>
+              <label>설정
+                <select name="mode" required>
+                  <option>자유 입장</option>
+                  <option>신청 입장</option>
+                  <option>비번 입장</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-row">
+              <label>성별
+                <select name="gender" required>
+                  <option>무관</option>
+                  <option>남성</option>
+                  <option>여성</option>
+                </select>
+              </label>
+              <label>나이
+                <select name="age" required>
+                  <option value="10">10대</option>
+                  <option value="20" selected>20대</option>
+                  <option value="30">30대</option>
+                  <option value="40">40대 이상</option>
+                </select>
+              </label>
+              <label>비밀번호
+                <input name="password" maxlength="20" placeholder="비번 입장일 때만 입력" />
+              </label>
+            </div>
+            <div class="form-row">
+              <label>인원수
+                <input name="partySize" type="number" min="2" max="8" value="2" required />
+              </label>
+              <label>마이크 사용 여부
+                <select name="mic" required>
+                  <option value="true">사용</option>
+                  <option value="false">미사용</option>
+                </select>
+              </label>
+              <label>한마디
+                <input name="shortIntro" maxlength="28" placeholder="친절하게, 빡겜 가능" />
+              </label>
+            </div>
+            <label>소개
+              <textarea name="intro" required maxlength="180" placeholder="플레이 스타일, 원하는 분위기, 주의사항을 적어주세요."></textarea>
+            </label>
+            <button class="primary-button wide" type="submit">등록</button>
+          </form>
+        </section>
+
+        <section class="view" id="friendsView">
+          <div class="split-layout">
+            <div>
+              <div class="section-title">
+                <h2>친구</h2>
+              </div>
+              <form class="friend-search" id="friendSearchForm">
+                <input id="friendSearchInput" placeholder="닉네임 검색" autocomplete="off" />
+                <button class="primary-button" type="submit">추가</button>
+              </form>
+              <div class="friend-list" id="friendList"></div>
+            </div>
+            <div class="message-panel">
+              <div class="section-title">
+                <h2 id="messageTarget">개인 메시지</h2>
+                <span id="messageStatus">대상을 선택하세요</span>
+              </div>
+              <div class="dm-log" id="dmLog"></div>
+              <form class="chat-input" id="dmForm">
+                <input id="dmInput" placeholder="메시지 입력" autocomplete="off" />
+                <button class="primary-button" type="submit">전송</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="boardView">
+          <div class="board-layout">
+            <div class="game-tabs" id="boardTabs"></div>
+            <div class="board-panel">
+              <div class="section-title">
+                <h2 id="boardTitle">게시판</h2>
+                <button class="ghost-button" id="newBoardPost">글쓰기</button>
+              </div>
+              <div class="board-list" id="boardList"></div>
+            </div>
+            <div class="message-panel">
+              <div class="section-title">
+                <h2 id="threadTitle">글 상세</h2>
+              </div>
+              <div class="thread-body" id="threadBody"></div>
+              <div class="dm-log" id="threadLog"></div>
+              <form class="chat-input" id="threadForm">
+                <input id="threadInput" placeholder="댓글 입력" autocomplete="off" />
+                <button class="primary-button" type="submit">등록</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="boardEditorView">
+          <form class="editor" id="boardPostForm">
+            <div class="section-title">
+              <div>
+                <h2 id="boardEditorTitle">게시글 작성</h2>
+                <span class="subtle" id="boardEditorGame">게임 게시판</span>
+              </div>
+              <button class="ghost-button" type="button" id="cancelBoardEdit">목록으로</button>
+            </div>
+            <label>제목
+              <input name="title" id="boardPostTitle" required maxlength="60" placeholder="제목을 입력하세요" />
+            </label>
+            <label>글 내용
+              <textarea name="body" id="boardPostBody" required maxlength="2000" placeholder="내용을 입력하세요"></textarea>
+            </label>
+            <button class="primary-button wide" type="submit">등록</button>
+          </form>
+        </section>
+
+        <section class="view" id="roomView">
+          <div class="room-header">
+            <div>
+              <p class="eyebrow">현재 방</p>
+              <h2 id="roomTitle">랭크 듀오 파티</h2>
+            </div>
+            <div class="room-actions">
+              <button class="ghost-button" id="roomSettings">설정</button>
+              <button class="danger-button" id="deleteRoom">방 삭제</button>
+              <button class="danger-button" id="leaveRoom">나가기</button>
+            </div>
+          </div>
+          <div class="room-grid">
+            <div class="participant-list" id="participantList"></div>
+            <div class="room-chat">
+              <div class="room-toolbar">
+                <button class="toggle active" id="micToggle">마이크 ON</button>
+                <button class="ghost-button" id="micPermission">마이크 허용</button>
+                <span id="roomMeta">4명 · 요청 승인</span>
+              </div>
+              <div class="dm-log" id="roomLog"></div>
+              <form class="chat-input" id="roomForm">
+                <input id="roomInput" placeholder="방 채팅 입력" autocomplete="off" />
+                <button class="primary-button" type="submit">전송</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="roomSettingsView">
+          <form class="editor" id="roomSettingsForm">
+            <div class="section-title">
+              <div>
+                <h2>방 설정</h2>
+                <span class="subtle">방 제목, 설명, 입장 방식, 비밀번호를 다시 설정합니다.</span>
+              </div>
+              <button class="ghost-button" type="button" id="cancelRoomSettings">방으로</button>
+            </div>
+            <div class="form-row">
+              <label>방 제목
+                <input name="title" id="roomSettingTitle" required maxlength="35" />
+              </label>
+              <label>입장 방식
+                <select name="mode" id="roomSettingMode" required>
+                  <option>자유 입장</option>
+                  <option>신청 입장</option>
+                  <option>비번 입장</option>
+                </select>
+              </label>
+              <label>비밀번호
+                <input name="password" id="roomSettingPassword" maxlength="20" placeholder="비번 입장일 때만 입력" />
+              </label>
+            </div>
+            <label>설명
+              <textarea name="intro" id="roomSettingIntro" maxlength="180"></textarea>
+            </label>
+            <button class="primary-button wide" type="submit">저장</button>
+          </form>
+        </section>
+
+        <section class="view" id="safetyView">
+          <div class="section-title">
+            <h2>신고 및 차단</h2>
+            <button class="ghost-button" id="clearSafety">기록 정리</button>
+          </div>
+          <div class="safety-grid">
+            <div>
+              <h3>차단한 사용자</h3>
+              <div id="blockedList" class="simple-list"></div>
+            </div>
+            <div>
+              <h3>신고 기록</h3>
+              <div id="reportList" class="simple-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="profileView">
+          <form class="editor" id="profileForm">
+            <div class="profile-editor-head">
+              <div class="avatar large-avatar" id="profileAvatar">나</div>
+              <div>
+                <h2>프로필 설정</h2>
+                <span class="subtle">매칭, 친구, 채팅에 표시되는 내 정보입니다.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>닉네임
+                <input name="nickname" id="profileNickname" required maxlength="16" placeholder="닉네임" />
+              </label>
+              <label>성별
+                <select name="gender" id="profileGender">
+                  <option>비공개</option>
+                  <option>남성</option>
+                  <option>여성</option>
+                  <option>무관</option>
+                </select>
+              </label>
+              <label>나이대
+                <select name="age" id="profileAge">
+                  <option value="">비공개</option>
+                  <option value="10">10대</option>
+                  <option value="20">20대</option>
+                  <option value="30">30대</option>
+                  <option value="40">40대 이상</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-row">
+              <label>주 게임
+                <select name="mainGame" id="profileGame"></select>
+              </label>
+              <label>현재 상태
+                <select name="status" id="profileStatus">
+                  <option>온라인 · 매칭 가능</option>
+                  <option>게임 중</option>
+                  <option>자리 비움</option>
+                  <option>오프라인 표시</option>
+                </select>
+              </label>
+              <label>마이크
+                <select name="mic" id="profileMic">
+                  <option value="true">사용 가능</option>
+                  <option value="false">사용 안 함</option>
+                </select>
+              </label>
+            </div>
+            <label>한마디
+              <textarea name="bio" id="profileBio" maxlength="180" placeholder="플레이 스타일이나 선호하는 분위기를 적어주세요."></textarea>
+            </label>
+            <div class="top-actions">
+              <button class="primary-button" type="submit">저장</button>
+              <button class="danger-button" type="button" id="logoutButton">로그아웃</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <section class="login-screen" id="loginScreen" aria-modal="true" role="dialog">
+      <form class="login-card" id="loginForm">
+        <div class="brand login-brand">
+          <div class="brand-mark">PU</div>
+          <div>
+            <strong>PartyUp</strong>
+            <span>게임 매칭 SNS</span>
+          </div>
+        </div>
+        <div>
+          <h1>로그인</h1>
+          <p class="subtle">닉네임으로 바로 시작하고, 프로필은 나중에 수정할 수 있습니다.</p>
+        </div>
+        <label>닉네임
+          <input name="nickname" required maxlength="16" placeholder="사용할 닉네임" autocomplete="nickname" />
+        </label>
+        <label>주 게임
+          <select name="mainGame" id="loginGame"></select>
+        </label>
+        <button class="primary-button wide" type="submit">시작하기</button>
+      </form>
+    </section>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="E.JS"></script>
+  </body>
+</html>
