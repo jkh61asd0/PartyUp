@@ -78,6 +78,8 @@ let sharedStateLoaded = !SHARED_API_URLS.length;
 let sharedSaveTimer = 0;
 let sharedSyncTimer = 0;
 let sharedLoadInFlight = false;
+let sharedSaveInFlight = false;
+let sharedSaveQueued = false;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -213,6 +215,7 @@ function updateSharedRoom(mutator) {
 
 async function loadSharedState(silent = false) {
   if (!SHARED_API_URLS.length) return;
+  if (sharedSaveTimer || sharedSaveInFlight || sharedSaveQueued) return;
   if (sharedLoadInFlight) return;
   sharedLoadInFlight = true;
   for (const url of SHARED_API_URLS) {
@@ -240,8 +243,16 @@ function startSharedSync() {
 
 function saveSharedState() {
   if (!sharedApiUrl || !sharedStateLoaded) return;
+  sharedSaveQueued = true;
   window.clearTimeout(sharedSaveTimer);
   sharedSaveTimer = window.setTimeout(async () => {
+    sharedSaveTimer = 0;
+    if (sharedSaveInFlight) {
+      saveSharedState();
+      return;
+    }
+    sharedSaveInFlight = true;
+    sharedSaveQueued = false;
     try {
       const response = await fetch(sharedApiUrl, {
         method: "PUT",
@@ -251,6 +262,9 @@ function saveSharedState() {
       if (response.ok) applySharedState(await response.json());
     } catch {
       showToast("공유 서버 저장에 실패했습니다.");
+    } finally {
+      sharedSaveInFlight = false;
+      if (sharedSaveQueued) saveSharedState();
     }
   }, 250);
 }
