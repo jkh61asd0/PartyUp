@@ -1,5 +1,4 @@
 const STORAGE_KEY = "partyup-state-v3";
-const ADMIN_CODE = "0409";
 
 function sharedApiUrls() {
   if (window.location.protocol === "file:") return [];
@@ -12,6 +11,18 @@ function sharedApiUrls() {
 }
 
 const SHARED_API_URLS = sharedApiUrls();
+
+function adminApiUrls() {
+  if (window.location.protocol === "file:") return [];
+  const urls = ["/api/admin"];
+  const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+  if (isLocalHost && window.location.port !== "3000") {
+    urls.push(`${window.location.protocol}//${window.location.hostname}:3000/api/admin`);
+  }
+  return [...new Set(urls)];
+}
+
+const ADMIN_API_URLS = adminApiUrls();
 
 const games = ["리그 오브 레전드", "발로란트", "오버워치 2", "배틀그라운드", "로스트아크", "메이플스토리"];
 
@@ -229,6 +240,24 @@ async function waitForSharedLoad() {
   while (sharedLoadInFlight && Date.now() - startedAt < 5000) {
     await new Promise((resolve) => window.setTimeout(resolve, 50));
   }
+}
+
+async function verifyAdminCode(code) {
+  if (!ADMIN_API_URLS.length) return false;
+  for (const url of ADMIN_API_URLS) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok) return true;
+    } catch {
+      // Try the next API URL.
+    }
+  }
+  return false;
 }
 
 async function loadSharedState(silent = false) {
@@ -1309,7 +1338,7 @@ function bindEvents() {
     button.addEventListener("click", async () => {
       if (button.dataset.view === "admin" && !state.isAdmin) {
         const code = prompt("관리자 코드를 입력하세요.");
-        if (code !== ADMIN_CODE) {
+        if (!(await verifyAdminCode(code))) {
           showToast("관리자 코드가 맞지 않습니다.");
           return;
         }

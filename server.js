@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -266,6 +267,21 @@ async function handleApi(req, res) {
   }
 }
 
+async function handleAdminApi(req, res) {
+  if (req.method === "OPTIONS") return sendJson(res, 204, {});
+  if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "Method not allowed" });
+
+  try {
+    const input = JSON.parse(await readBody(req));
+    const left = Buffer.from(String(input.code || ""));
+    const right = Buffer.from("0409");
+    const ok = left.length === right.length && crypto.timingSafeEqual(left, right);
+    return sendJson(res, ok ? 200 : 401, { ok });
+  } catch {
+    return sendJson(res, 400, { ok: false, error: "Invalid JSON" });
+  }
+}
+
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const requestedPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
@@ -291,6 +307,7 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith("/api/admin")) return handleAdminApi(req, res);
   if (req.url.startsWith("/api/state")) return handleApi(req, res);
   return serveStatic(req, res);
 });
