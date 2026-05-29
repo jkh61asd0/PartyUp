@@ -212,11 +212,12 @@ function saveSharedState() {
   window.clearTimeout(sharedSaveTimer);
   sharedSaveTimer = window.setTimeout(async () => {
     try {
-      await fetch(sharedApiUrl, {
+      const response = await fetch(sharedApiUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sharedStatePayload())
       });
+      if (response.ok) applySharedState(await response.json());
     } catch {
       showToast("공유 서버 저장에 실패했습니다.");
     }

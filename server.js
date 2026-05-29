@@ -41,6 +41,102 @@ function readDatabase() {
   }
 }
 
+function uniqueById(items = []) {
+  const seen = new Map();
+  items.forEach((item) => {
+    if (item && typeof item === "object") seen.set(item.id || JSON.stringify(item), item);
+  });
+  return [...seen.values()];
+}
+
+function mergeMessages(current = [], incoming = []) {
+  return uniqueById([...current, ...incoming])
+    .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+    .slice(-300);
+}
+
+function mergeRooms(currentRooms = {}, incomingRooms = {}) {
+  const rooms = { ...currentRooms };
+  Object.entries(incomingRooms || {}).forEach(([roomId, incomingRoom]) => {
+    const currentRoom = rooms[roomId] || {};
+    const kicked = [...new Set([...(currentRoom.kicked || []), ...(incomingRoom.kicked || [])])];
+    const participants = [...new Set([...(currentRoom.participants || []), ...(incomingRoom.participants || [])])].filter((nickname) => !kicked.includes(nickname));
+    rooms[roomId] = {
+      ...currentRoom,
+      ...incomingRoom,
+      participants,
+      kicked,
+      messages: mergeMessages(currentRoom.messages, incomingRoom.messages)
+    };
+  });
+  return rooms;
+}
+
+function mergeObjectMessageLists(current = {}, incoming = {}) {
+  const merged = { ...current };
+  Object.entries(incoming || {}).forEach(([key, messages]) => {
+    merged[key] = mergeMessages(merged[key], messages);
+  });
+  return merged;
+}
+
+function mergeById(current = [], incoming = []) {
+  const merged = new Map();
+  current.forEach((item) => {
+    if (item?.id) merged.set(item.id, item);
+  });
+  incoming.forEach((item) => {
+    if (item?.id) merged.set(item.id, { ...(merged.get(item.id) || {}), ...item });
+  });
+  return [...merged.values()];
+}
+
+function mergeRecruits(current = [], incoming = []) {
+  const merged = new Map();
+  current.forEach((recruit) => {
+    if (recruit?.id) merged.set(recruit.id, recruit);
+  });
+  incoming.forEach((recruit) => {
+    if (!recruit?.id) return;
+    const previous = merged.get(recruit.id) || {};
+    merged.set(recruit.id, {
+      ...previous,
+      ...recruit,
+      requests: mergeById(previous.requests || [], recruit.requests || [])
+    });
+  });
+  return [...merged.values()];
+}
+
+function normalizeInput(input = {}) {
+  return {
+    recruits: Array.isArray(input.recruits) ? input.recruits : [],
+    rooms: input.rooms && typeof input.rooms === "object" && !Array.isArray(input.rooms) ? input.rooms : {},
+    friendRequests: Array.isArray(input.friendRequests) ? input.friendRequests : [],
+    friendships: Array.isArray(input.friendships) ? input.friendships : [],
+    directMessages: input.directMessages && typeof input.directMessages === "object" && !Array.isArray(input.directMessages) ? input.directMessages : {},
+    boardPosts: Array.isArray(input.boardPosts) ? input.boardPosts : [],
+    lobbyMessages: Array.isArray(input.lobbyMessages) ? input.lobbyMessages : [],
+    reports: Array.isArray(input.reports) ? input.reports : [],
+    bans: Array.isArray(input.bans) ? input.bans : []
+  };
+}
+
+function mergeState(current, incoming = {}) {
+  const normalizedIncoming = normalizeInput(incoming);
+  return {
+    recruits: Object.prototype.hasOwnProperty.call(incoming, "recruits") ? mergeRecruits(current.recruits, normalizedIncoming.recruits) : current.recruits,
+    rooms: mergeRooms(current.rooms, normalizedIncoming.rooms),
+    friendRequests: mergeById(current.friendRequests, normalizedIncoming.friendRequests),
+    friendships: mergeById(current.friendships, normalizedIncoming.friendships),
+    directMessages: mergeObjectMessageLists(current.directMessages, normalizedIncoming.directMessages),
+    boardPosts: Object.prototype.hasOwnProperty.call(incoming, "boardPosts") ? normalizedIncoming.boardPosts : current.boardPosts,
+    lobbyMessages: mergeMessages(current.lobbyMessages, normalizedIncoming.lobbyMessages),
+    reports: mergeById(current.reports, normalizedIncoming.reports),
+    bans: mergeById(current.bans, normalizedIncoming.bans)
+  };
+}
+
 function writeDatabase(data) {
   fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
 }
@@ -77,17 +173,7 @@ async function handleApi(req, res) {
 
   try {
     const input = JSON.parse(await readBody(req));
-    const nextData = {
-      recruits: Array.isArray(input.recruits) ? input.recruits : [],
-      rooms: input.rooms && typeof input.rooms === "object" && !Array.isArray(input.rooms) ? input.rooms : {},
-      friendRequests: Array.isArray(input.friendRequests) ? input.friendRequests : [],
-      friendships: Array.isArray(input.friendships) ? input.friendships : [],
-      directMessages: input.directMessages && typeof input.directMessages === "object" && !Array.isArray(input.directMessages) ? input.directMessages : {},
-      boardPosts: Array.isArray(input.boardPosts) ? input.boardPosts : [],
-      lobbyMessages: Array.isArray(input.lobbyMessages) ? input.lobbyMessages : [],
-      reports: Array.isArray(input.reports) ? input.reports : [],
-      bans: Array.isArray(input.bans) ? input.bans : []
-    };
+    const nextData = mergeState(readDatabase(), input);
     writeDatabase(nextData);
     return sendJson(res, 200, nextData);
   } catch {

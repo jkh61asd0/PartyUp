@@ -19,6 +19,90 @@ function normalizeData(input = {}) {
   };
 }
 
+function uniqueById(items = []) {
+  const seen = new Map();
+  items.forEach((item) => {
+    if (item && typeof item === "object") seen.set(item.id || JSON.stringify(item), item);
+  });
+  return [...seen.values()];
+}
+
+function mergeMessages(current = [], incoming = []) {
+  return uniqueById([...current, ...incoming])
+    .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+    .slice(-300);
+}
+
+function mergeRooms(currentRooms = {}, incomingRooms = {}) {
+  const rooms = { ...currentRooms };
+  Object.entries(incomingRooms || {}).forEach(([roomId, incomingRoom]) => {
+    const currentRoom = rooms[roomId] || {};
+    const kicked = [...new Set([...(currentRoom.kicked || []), ...(incomingRoom.kicked || [])])];
+    const participants = [...new Set([...(currentRoom.participants || []), ...(incomingRoom.participants || [])])].filter((nickname) => !kicked.includes(nickname));
+    rooms[roomId] = {
+      ...currentRoom,
+      ...incomingRoom,
+      participants,
+      kicked,
+      messages: mergeMessages(currentRoom.messages, incomingRoom.messages)
+    };
+  });
+  return rooms;
+}
+
+function mergeObjectMessageLists(current = {}, incoming = {}) {
+  const merged = { ...current };
+  Object.entries(incoming || {}).forEach(([key, messages]) => {
+    merged[key] = mergeMessages(merged[key], messages);
+  });
+  return merged;
+}
+
+function mergeById(current = [], incoming = []) {
+  const merged = new Map();
+  current.forEach((item) => {
+    if (item?.id) merged.set(item.id, item);
+  });
+  incoming.forEach((item) => {
+    if (item?.id) merged.set(item.id, { ...(merged.get(item.id) || {}), ...item });
+  });
+  return [...merged.values()];
+}
+
+function mergeRecruits(current = [], incoming = []) {
+  const merged = new Map();
+  current.forEach((recruit) => {
+    if (recruit?.id) merged.set(recruit.id, recruit);
+  });
+  incoming.forEach((recruit) => {
+    if (!recruit?.id) return;
+    const previous = merged.get(recruit.id) || {};
+    merged.set(recruit.id, {
+      ...previous,
+      ...recruit,
+      requests: mergeById(previous.requests || [], recruit.requests || [])
+    });
+  });
+  return [...merged.values()];
+}
+
+function mergeState(currentInput = {}, incomingInput = {}) {
+  const current = normalizeData(currentInput);
+  const incoming = incomingInput && typeof incomingInput === "object" ? incomingInput : {};
+  const normalizedIncoming = normalizeData(incoming);
+  return {
+    recruits: Object.prototype.hasOwnProperty.call(incoming, "recruits") ? mergeRecruits(current.recruits, normalizedIncoming.recruits) : current.recruits,
+    rooms: mergeRooms(current.rooms, normalizedIncoming.rooms),
+    friendRequests: mergeById(current.friendRequests, normalizedIncoming.friendRequests),
+    friendships: mergeById(current.friendships, normalizedIncoming.friendships),
+    directMessages: mergeObjectMessageLists(current.directMessages, normalizedIncoming.directMessages),
+    boardPosts: Object.prototype.hasOwnProperty.call(incoming, "boardPosts") ? normalizedIncoming.boardPosts : current.boardPosts,
+    lobbyMessages: mergeMessages(current.lobbyMessages, normalizedIncoming.lobbyMessages),
+    reports: mergeById(current.reports, normalizedIncoming.reports),
+    bans: mergeById(current.bans, normalizedIncoming.bans)
+  };
+}
+
 function sendJson(res, status, data) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -49,8 +133,17 @@ async function readRedisState() {
 }
 
 async function writeRedisState(data) {
-  const nextData = normalizeData(data);
-  await redisCommand(`set/${encodeURIComponent(REDIS_KEY)}/${encodeURIComponent(JSON.stringify(nextData))}`);
+  const nextData = mergeState(await readRedisState(), data);
+  const { url, token } = redisConfig();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(["SET", REDIS_KEY, JSON.stringify(nextData)])
+  });
+  if (!response.ok) throw new Error(`Upstash command failed: ${response.status}`);
   return nextData;
 }
 
@@ -90,7 +183,7 @@ async function writeState(data) {
     return writeRedisState(input);
   }
 
-  const nextData = normalizeData(input);
+  const nextData = mergeState(await readState(), input);
   const response = await fetch(`${supabaseBaseUrl()}?on_conflict=id`, {
     method: "POST",
     headers: {
