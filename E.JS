@@ -1,10 +1,20 @@
 const STORAGE_KEY = "partyup-state-v3";
 const SHARED_API_URL = window.location.protocol === "file:" ? "" : "/api/state";
+const ADMIN_CODE = "1234";
 
 const games = ["리그 오브 레전드", "발로란트", "오버워치 2", "배틀그라운드", "로스트아크", "메이플스토리"];
 
 const initialState = {
   isLoggedIn: false,
+  isAdmin: false,
+  settings: {
+    theme: "system",
+    density: "comfortable",
+    autoScrollChat: true,
+    boardSort: "newest",
+    chatDisplay: "comfortable",
+    soundCue: false
+  },
   me: {
     nickname: "",
     status: "온라인 · 매칭 가능",
@@ -23,10 +33,12 @@ const initialState = {
   micAllowed: false,
   blocked: [],
   reports: [],
+  bans: [],
   recruits: [],
   friends: [],
   dms: {},
   boardPosts: [],
+  lobbyMessages: [],
   room: {
     recruitId: "",
     title: "내 파티 방",
@@ -42,6 +54,7 @@ const initialState = {
 let state = loadState();
 let sharedStateLoaded = !SHARED_API_URL;
 let sharedSaveTimer = 0;
+let sharedSyncTimer = 0;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -59,38 +72,56 @@ function loadState() {
   }
 }
 
-function saveState() {
+function saveState(syncShared = true) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  saveSharedState();
+  if (syncShared) saveSharedState();
 }
 
 function sharedStatePayload() {
   return {
     recruits: state.recruits,
-    boardPosts: state.boardPosts
+    boardPosts: state.boardPosts,
+    lobbyMessages: state.lobbyMessages,
+    reports: state.reports,
+    bans: state.bans
   };
 }
 
 function applySharedState(data) {
   if (!data || typeof data !== "object") return;
+  const previousLobbyId = state.lobbyMessages.at(-1)?.id || "";
   if (Array.isArray(data.recruits)) state.recruits = data.recruits;
   if (Array.isArray(data.boardPosts)) state.boardPosts = data.boardPosts;
+  if (Array.isArray(data.lobbyMessages)) state.lobbyMessages = data.lobbyMessages;
+  if (Array.isArray(data.reports)) state.reports = data.reports;
+  if (Array.isArray(data.bans)) state.bans = data.bans;
   normalizeBoardPosts();
+  normalizeLobbyMessages();
+  normalizeAdminData();
+  const nextLobbyMessage = state.lobbyMessages.at(-1);
+  if (sharedStateLoaded && currentSettings().soundCue && nextLobbyMessage?.id !== previousLobbyId && nextLobbyMessage?.from !== displayName()) {
+    playSoundCue();
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-async function loadSharedState() {
+async function loadSharedState(silent = false) {
   if (!SHARED_API_URL) return;
   try {
     const response = await fetch(SHARED_API_URL, { cache: "no-store" });
     if (!response.ok) throw new Error("Shared state request failed");
     applySharedState(await response.json());
     sharedStateLoaded = true;
-    renderAll();
+    renderAll(false);
   } catch {
     sharedStateLoaded = false;
-    showToast("공유 서버에 연결할 수 없어 이 브라우저에만 저장됩니다.");
+    if (!silent) showToast("공유 서버에 연결할 수 없어 이 브라우저에만 저장됩니다.");
   }
+}
+
+function startSharedSync() {
+  if (!SHARED_API_URL || sharedSyncTimer) return;
+  sharedSyncTimer = window.setInterval(() => loadSharedState(true), 3500);
 }
 
 function saveSharedState() {
@@ -149,9 +180,12 @@ function setView(view) {
     create: "모집 글 작성",
     friends: "친구",
     board: "게임별 게시판",
+    lobby: "전체 채팅",
     room: "방",
     safety: "신고 및 차단",
+    admin: "관리자",
     profile: "프로필 설정",
+    settings: "설정",
     boardEditor: "게시글 작성",
     roomSettings: "방 설정"
   };
@@ -160,6 +194,36 @@ function setView(view) {
 
 function displayName() {
   return state.me.nickname || "게스트";
+}
+
+function currentSettings() {
+  state.settings = { ...clone(initialState.settings), ...(state.settings || {}) };
+  return state.settings;
+}
+
+function applySettings() {
+  const settings = currentSettings();
+  const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const theme = settings.theme === "system" ? (systemDark ? "dark" : "light") : settings.theme;
+  document.documentElement.dataset.theme = theme;
+  document.body.dataset.density = settings.density;
+  document.body.dataset.chatDisplay = settings.chatDisplay;
+}
+
+function playSoundCue() {
+  try {
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.frequency.value = 740;
+    gain.gain.value = 0.03;
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.08);
+  } catch {
+    // Browsers can block audio before the first user gesture.
+  }
 }
 
 function avatarText(name = displayName()) {
@@ -183,7 +247,54 @@ function syncMyIdentity() {
   state.room.participants = state.room.participants.map((participant) => (participant === "치킨플레이어" || participant === "게스트" ? name : participant));
 }
 
+function activeBans() {
+  const now = Date.now();
+  return state.bans.filter((ban) => !ban.expiresAt || new Date(ban.expiresAt).getTime() > now);
+}
+
+function activeBanFor(nickname) {
+  return activeBans().find((ban) => ban.nickname === nickname);
+}
+
+function banMessage(ban) {
+  if (!ban) return "";
+  const until = ban.expiresAt ? new Date(ban.expiresAt).toLocaleString("ko-KR") : "영구";
+  return `정지된 닉네임입니다. 해제: ${until}`;
+}
+
+function guardNotBanned() {
+  const ban = activeBanFor(displayName());
+  if (!ban) return true;
+  showToast(banMessage(ban));
+  return false;
+}
+
+function banDurationLabel(value) {
+  const labels = {
+    "10m": "10분",
+    "30m": "30분",
+    "1h": "1시간",
+    "1d": "1일",
+    "7d": "7일",
+    forever: "영구정지"
+  };
+  return labels[value] || value;
+}
+
+function banExpiresAt(value) {
+  const minutes = {
+    "10m": 10,
+    "30m": 30,
+    "1h": 60,
+    "1d": 60 * 24,
+    "7d": 60 * 24 * 7
+  }[value];
+  return minutes ? new Date(Date.now() + minutes * 60 * 1000).toISOString() : "";
+}
+
 function canInteractWithRecruit(recruit) {
+  const ban = activeBanFor(displayName());
+  if (ban) return { ok: false, reason: banMessage(ban) };
   if (recruit.owner === displayName()) return { ok: false, reason: "내 방에는 신청할 수 없습니다." };
   if (state.currentRoomId && state.currentRoomId !== recruit.id) return { ok: false, reason: "이미 다른 방에 있어서 신청할 수 없습니다." };
   if (recruit.requests.some((request) => request.nickname === displayName())) return { ok: false, reason: "이미 신청한 방입니다." };
@@ -191,7 +302,20 @@ function canInteractWithRecruit(recruit) {
 }
 
 function renderLoginState() {
+  if (state.isLoggedIn && activeBanFor(displayName())) {
+    state.isLoggedIn = false;
+  }
   $("#loginScreen").classList.toggle("active", !state.isLoggedIn);
+}
+
+function renderSettingsForm() {
+  const settings = currentSettings();
+  $("#settingTheme").value = settings.theme;
+  $("#settingDensity").value = settings.density;
+  $("#settingBoardSort").value = settings.boardSort;
+  $("#settingChatDisplay").value = settings.chatDisplay;
+  $("#settingAutoScroll").checked = settings.autoScrollChat;
+  $("#settingSoundCue").checked = settings.soundCue;
 }
 
 function renderProfileForm() {
@@ -320,6 +444,7 @@ function renderDm() {
   $("#dmLog").innerHTML = messages.length
     ? messages.map((message) => renderBubble(message)).join("")
     : '<div class="empty">메시지가 없습니다.</div>';
+  if (currentSettings().autoScrollChat) $("#dmLog").scrollTop = $("#dmLog").scrollHeight;
 }
 
 function renderBoard() {
@@ -328,7 +453,12 @@ function renderBoard() {
     .map((game) => `<button class="${state.selectedBoardGame === game ? "active" : ""}" data-board-game="${escapeHtml(game)}">${escapeHtml(game)}</button>`)
     .join("");
   $("#boardTitle").textContent = state.selectedBoardGame;
-  const posts = state.boardPosts.filter((post) => post.game === state.selectedBoardGame && !state.blocked.includes(post.author));
+  const posts = state.boardPosts
+    .filter((post) => post.game === state.selectedBoardGame && !state.blocked.includes(post.author))
+    .sort((a, b) => {
+      const diff = new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      return currentSettings().boardSort === "oldest" ? -diff : diff;
+    });
   if (!posts.some((post) => post.id === state.selectedThreadId)) state.selectedThreadId = posts[0]?.id || "";
   $("#boardList").innerHTML = posts.length
     ? posts
@@ -351,6 +481,15 @@ function renderBoard() {
   renderThread();
 }
 
+function renderLobby() {
+  normalizeLobbyMessages();
+  const messages = state.lobbyMessages.filter((message) => !state.blocked.includes(message.from));
+  $("#lobbyLog").innerHTML = messages.length
+    ? messages.map((message) => renderBubble(message)).join("")
+    : '<div class="empty">아직 전체 채팅이 없습니다.</div>';
+  if (currentSettings().autoScrollChat) $("#lobbyLog").scrollTop = $("#lobbyLog").scrollHeight;
+}
+
 function renderThread() {
   const post = state.boardPosts.find((item) => item.id === state.selectedThreadId);
   $("#threadTitle").textContent = post ? post.title : "글 상세";
@@ -360,6 +499,7 @@ function renderThread() {
   $("#threadLog").innerHTML = post?.messages.length
     ? post.messages.map((message) => renderComment(post.id, message)).join("")
     : '<div class="empty">댓글이 없습니다.</div>';
+  if (currentSettings().autoScrollChat) $("#threadLog").scrollTop = $("#threadLog").scrollHeight;
 }
 
 function renderComment(postId, message) {
@@ -385,6 +525,31 @@ function normalizeBoardPosts() {
       if (!message.id) message.id = `c${Date.now()}${Math.random().toString(16).slice(2)}`;
       if (!message.createdAt) message.createdAt = new Date().toISOString();
     });
+  });
+}
+
+function normalizeLobbyMessages() {
+  if (!Array.isArray(state.lobbyMessages)) state.lobbyMessages = [];
+  state.lobbyMessages.forEach((message) => {
+    if (!message.id) message.id = `l${Date.now()}${Math.random().toString(16).slice(2)}`;
+    if (!message.createdAt) message.createdAt = new Date().toISOString();
+  });
+  state.lobbyMessages = state.lobbyMessages.slice(-300);
+}
+
+function normalizeAdminData() {
+  if (!Array.isArray(state.reports)) state.reports = [];
+  if (!Array.isArray(state.bans)) state.bans = [];
+  state.reports.forEach((report) => {
+    if (!report.id) report.id = `rep${Date.now()}${Math.random().toString(16).slice(2)}`;
+    if (!report.reporter) report.reporter = "알 수 없음";
+    if (!report.status) report.status = "대기";
+    if (!report.createdAt) report.createdAt = new Date().toISOString();
+  });
+  state.bans.forEach((ban) => {
+    if (!ban.id) ban.id = `ban${Date.now()}${Math.random().toString(16).slice(2)}`;
+    if (!ban.durationLabel) ban.durationLabel = banDurationLabel(ban.duration || "forever");
+    if (!ban.createdAt) ban.createdAt = new Date().toISOString();
   });
 }
 
@@ -431,6 +596,7 @@ function renderRoom() {
   $("#micToggle").classList.toggle("active", state.micOn);
   $("#micPermission").textContent = state.micAllowed ? "마이크 허용됨" : "마이크 허용";
   $("#roomLog").innerHTML = state.room.messages.map((message) => renderBubble(message)).join("");
+  if (currentSettings().autoScrollChat) $("#roomLog").scrollTop = $("#roomLog").scrollHeight;
 }
 
 function renderRoomSettingsForm() {
@@ -451,12 +617,66 @@ function renderSafety() {
     : '<div class="empty">신고 기록이 없습니다.</div>';
 }
 
-function renderBubble(message) {
-  const isMe = message.from === "me" || message.from === displayName();
-  return `<div class="bubble ${isMe ? "me" : ""}"><strong>${isMe ? displayName() : escapeHtml(message.from)}</strong><br>${escapeHtml(message.text)}</div>`;
+function renderAdmin() {
+  normalizeAdminData();
+  const reports = state.reports;
+  const bans = activeBans();
+  $("#adminReportCount").textContent = `${reports.length}건`;
+  $("#adminReports").innerHTML = reports.length
+    ? reports
+        .map((report) => {
+          const status = report.status || "대기";
+          return `<article class="admin-card">
+            <div>
+              <strong>${escapeHtml(report.target)}</strong>
+              <span class="card-meta">신고자 ${escapeHtml(report.reporter || "알 수 없음")} · ${new Date(report.createdAt).toLocaleString("ko-KR")} · ${escapeHtml(status)}</span>
+              <p>${escapeHtml(report.reason)}</p>
+            </div>
+            <div class="admin-actions">
+              <select data-ban-duration="${escapeHtml(report.id)}">
+                <option value="10m">10분</option>
+                <option value="30m">30분</option>
+                <option value="1h">1시간</option>
+                <option value="1d">1일</option>
+                <option value="7d">7일</option>
+                <option value="forever">영구정지</option>
+              </select>
+              <button class="danger-button" data-ban-target="${escapeHtml(report.target)}" data-report-id="${escapeHtml(report.id)}">정지</button>
+            </div>
+          </article>`;
+        })
+        .join("")
+    : '<div class="empty">접수된 신고가 없습니다.</div>';
+
+  $("#adminBans").innerHTML = bans.length
+    ? bans
+        .map((ban) => {
+          const until = ban.expiresAt ? new Date(ban.expiresAt).toLocaleString("ko-KR") : "영구";
+          return `<article class="admin-card">
+            <div>
+              <strong>${escapeHtml(ban.nickname)}</strong>
+              <span class="card-meta">${escapeHtml(ban.durationLabel)} · 해제 ${escapeHtml(until)}</span>
+              <p>${escapeHtml(ban.reason || "관리자 정지")}</p>
+            </div>
+            <button class="ghost-button" data-unban="${escapeHtml(ban.id)}">해제</button>
+          </article>`;
+        })
+        .join("")
+    : '<div class="empty">현재 정지된 닉네임이 없습니다.</div>';
 }
 
-function renderAll() {
+function renderBubble(message) {
+  const isMe = message.from === "me" || message.from === displayName();
+  const time = message.createdAt ? new Date(message.createdAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "";
+  return `<div class="bubble ${isMe ? "me" : ""}">
+    <strong>${isMe ? displayName() : escapeHtml(message.from)}</strong>
+    ${time ? `<span>${escapeHtml(time)}</span>` : ""}
+    <br>${escapeHtml(message.text)}
+  </div>`;
+}
+
+function renderAll(syncShared = true) {
+  applySettings();
   syncMyIdentity();
   $("#myNickname").textContent = displayName();
   $("#myStatus").textContent = state.me.status;
@@ -464,12 +684,15 @@ function renderAll() {
   renderRecruitList();
   renderFriends();
   renderBoard();
+  renderLobby();
   renderRoom();
   renderSafety();
+  renderAdmin();
   renderProfileForm();
   renderRoomSettingsForm();
+  renderSettingsForm();
   renderLoginState();
-  saveState();
+  saveState(syncShared);
 }
 
 function addFriend(nickname) {
@@ -493,8 +716,16 @@ function addFriend(nickname) {
 function reportUser(target) {
   const reason = prompt(`${target} 신고 사유를 입력하세요.`);
   if (!reason) return;
-  state.reports.unshift({ target, reason, createdAt: new Date().toISOString() });
+  state.reports.unshift({
+    id: `rep${Date.now()}${Math.random().toString(16).slice(2)}`,
+    target,
+    reporter: displayName(),
+    reason,
+    status: "대기",
+    createdAt: new Date().toISOString()
+  });
   renderSafety();
+  renderAdmin();
   saveState();
   showToast("신고가 접수되었습니다.");
 }
@@ -504,6 +735,37 @@ function blockUser(target) {
   if (!state.blocked.includes(target)) state.blocked.push(target);
   renderAll();
   showToast("차단했습니다.");
+}
+
+function banUser(target, duration, reportId = "") {
+  if (!target) return;
+  const reason = prompt(`${target} 정지 사유를 입력하세요.`, "신고 처리");
+  if (!reason?.trim()) return;
+  const previousBan = activeBanFor(target);
+  if (previousBan && !confirm("이미 정지된 닉네임입니다. 새 정지로 갱신할까요?")) return;
+
+  state.bans = state.bans.filter((ban) => ban.nickname !== target);
+  state.bans.unshift({
+    id: `ban${Date.now()}${Math.random().toString(16).slice(2)}`,
+    nickname: target,
+    reason: reason.trim(),
+    duration,
+    durationLabel: banDurationLabel(duration),
+    expiresAt: banExpiresAt(duration),
+    moderator: displayName(),
+    createdAt: new Date().toISOString()
+  });
+
+  const report = state.reports.find((item) => item.id === reportId);
+  if (report) report.status = "처리됨";
+  renderAll();
+  showToast(`${target} 닉네임을 ${banDurationLabel(duration)} 정지했습니다.`);
+}
+
+function unbanUser(banId) {
+  state.bans = state.bans.filter((ban) => ban.id !== banId);
+  renderAll();
+  showToast("정지를 해제했습니다.");
 }
 
 function deleteRecruitRoom(recruitId) {
@@ -577,7 +839,20 @@ async function requestMicPermission() {
 }
 
 function bindEvents() {
-  $$(".nav-item").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
+  $$(".nav-item").forEach((button) =>
+    button.addEventListener("click", () => {
+      if (button.dataset.view === "admin" && !state.isAdmin) {
+        const code = prompt("관리자 코드를 입력하세요.");
+        if (code !== ADMIN_CODE) {
+          showToast("관리자 코드가 맞지 않습니다.");
+          return;
+        }
+        state.isAdmin = true;
+        saveState();
+      }
+      setView(button.dataset.view);
+    })
+  );
   $$("[data-go]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.go)));
   $("#filterForm").addEventListener("input", renderRecruitList);
   $("#clearFilters").addEventListener("click", () => {
@@ -596,6 +871,11 @@ function bindEvents() {
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const nickname = data.nickname.trim();
     if (!nickname) return;
+    const ban = activeBanFor(nickname);
+    if (ban) {
+      showToast(banMessage(ban));
+      return;
+    }
     state.isLoggedIn = true;
     state.me.nickname = nickname;
     state.me.mainGame = data.mainGame;
@@ -610,6 +890,11 @@ function bindEvents() {
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const nextName = data.nickname.trim();
     if (!nextName) return;
+    const ban = activeBanFor(nextName);
+    if (ban) {
+      showToast(banMessage(ban));
+      return;
+    }
     state.me = {
       ...state.me,
       nickname: nextName,
@@ -638,15 +923,33 @@ function bindEvents() {
     showToast("프로필을 저장했습니다.");
   });
 
+  $("#settingsForm").addEventListener("input", (event) => {
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form).entries());
+    state.settings = {
+      theme: data.theme,
+      density: data.density,
+      autoScrollChat: Boolean(data.autoScrollChat),
+      boardSort: data.boardSort,
+      chatDisplay: data.chatDisplay,
+      soundCue: Boolean(data.soundCue)
+    };
+    applySettings();
+    renderBoard();
+    saveState();
+  });
+
   $("#logoutButton").addEventListener("click", () => {
     if (!confirm("로그아웃할까요? 브라우저에 저장된 글과 기록은 유지됩니다.")) return;
     state.isLoggedIn = false;
+    state.isAdmin = false;
     renderAll();
     showToast("로그아웃했습니다.");
   });
 
   $("#createForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!guardNotBanned()) return;
     if (state.currentRoomId) {
       showToast("이미 들어가 있거나 만든 방이 있으면 새 방을 만들 수 없습니다.");
       return;
@@ -695,6 +998,7 @@ function bindEvents() {
     if (!target) return;
 
     if (target.dataset.request) {
+      if (!guardNotBanned()) return;
       const recruit = state.recruits.find((item) => item.id === target.dataset.request);
       if (recruit) {
         const check = canInteractWithRecruit(recruit);
@@ -728,6 +1032,7 @@ function bindEvents() {
     }
 
     if (target.dataset.joinRoom) {
+      if (!guardNotBanned()) return;
       const recruit = state.recruits.find((item) => item.id === target.dataset.joinRoom);
       if (recruit) joinRecruitRoom(recruit);
     }
@@ -736,6 +1041,12 @@ function bindEvents() {
     if (target.dataset.friend) addFriend(target.dataset.friend);
     if (target.dataset.report) reportUser(target.dataset.report);
     if (target.dataset.block) blockUser(target.dataset.block);
+    if (target.dataset.banTarget) {
+      const reportId = target.dataset.reportId || "";
+      const duration = target.closest(".admin-card")?.querySelector("[data-ban-duration]")?.value || "10m";
+      banUser(target.dataset.banTarget, duration, reportId);
+    }
+    if (target.dataset.unban) unbanUser(target.dataset.unban);
     if (target.dataset.dm) {
       state.selectedFriendId = target.dataset.dm;
       renderDm();
@@ -817,11 +1128,23 @@ function bindEvents() {
 
   $("#dmForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!guardNotBanned()) return;
     const text = $("#dmInput").value.trim();
     if (!text || !state.selectedFriendId) return;
     state.dms[state.selectedFriendId].push({ from: "me", text });
     $("#dmInput").value = "";
     renderDm();
+    saveState();
+  });
+
+  $("#lobbyForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!guardNotBanned()) return;
+    const text = $("#lobbyInput").value.trim();
+    if (!text) return;
+    state.lobbyMessages.push({ id: `l${Date.now()}`, from: displayName(), text, createdAt: new Date().toISOString() });
+    $("#lobbyInput").value = "";
+    renderLobby();
     saveState();
   });
 
@@ -837,6 +1160,7 @@ function bindEvents() {
 
   $("#boardPostForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!guardNotBanned()) return;
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const title = data.title.trim();
     const body = data.body.trim();
@@ -873,6 +1197,7 @@ function bindEvents() {
 
   $("#threadForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!guardNotBanned()) return;
     const post = state.boardPosts.find((item) => item.id === state.selectedThreadId);
     const text = $("#threadInput").value.trim();
     if (!post || !text) return;
@@ -951,6 +1276,7 @@ function bindEvents() {
 
   $("#roomForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!guardNotBanned()) return;
     const text = $("#roomInput").value.trim();
     if (!text) return;
     state.room.messages.push({ from: "me", text });
@@ -974,3 +1300,8 @@ fillGameSelect($("#profileGame"));
 bindEvents();
 renderAll();
 loadSharedState();
+startSharedSync();
+
+window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (currentSettings().theme === "system") applySettings();
+});

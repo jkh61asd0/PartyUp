@@ -22,9 +22,12 @@
           <button class="nav-item" data-view="create">글 작성</button>
           <button class="nav-item" data-view="friends">친구</button>
           <button class="nav-item" data-view="board">게시판</button>
+          <button class="nav-item" data-view="lobby">전체 채팅</button>
           <button class="nav-item" data-view="room">방</button>
           <button class="nav-item" data-view="safety">신고/차단</button>
+          <button class="nav-item" data-view="admin">관리자</button>
           <button class="nav-item" data-view="profile">프로필 설정</button>
+          <button class="nav-item" data-view="settings">설정</button>
         </nav>
 
         <section class="profile-panel">
@@ -221,6 +224,32 @@
           </form>
         </section>
 
+        <section class="view" id="lobbyView">
+          <div class="lobby-layout">
+            <div class="message-panel">
+              <div class="section-title">
+                <div>
+                  <h2>전체 채팅</h2>
+                  <span class="subtle">게임 구분 없이 모두가 보는 실시간 대화</span>
+                </div>
+              </div>
+              <div class="dm-log lobby-log" id="lobbyLog"></div>
+              <form class="chat-input" id="lobbyForm">
+                <input id="lobbyInput" maxlength="300" placeholder="전체 채팅 입력" autocomplete="off" />
+                <button class="primary-button" type="submit">전송</button>
+              </form>
+            </div>
+            <aside class="lobby-side">
+              <h3>매칭 팁</h3>
+              <div class="simple-list">
+                <div class="simple-item">게임, 티어, 마이크 가능 여부를 먼저 말하면 더 빨리 모입니다.</div>
+                <div class="simple-item">방 채팅은 파티 안 대화, 전체 채팅은 공개 대화로 분리됩니다.</div>
+                <div class="simple-item">문제가 있으면 닉네임을 신고하면 관리자 탭에 접수됩니다.</div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
         <section class="view" id="roomView">
           <div class="room-header">
             <div>
@@ -298,6 +327,25 @@
           </div>
         </section>
 
+        <section class="view" id="adminView">
+          <div class="section-title">
+            <div>
+              <h2>관리자</h2>
+              <span class="subtle">접수된 신고 <strong id="adminReportCount">0건</strong></span>
+            </div>
+          </div>
+          <div class="admin-grid">
+            <div>
+              <h3>신고 접수</h3>
+              <div id="adminReports" class="admin-list"></div>
+            </div>
+            <div>
+              <h3>정지 목록</h3>
+              <div id="adminBans" class="admin-list"></div>
+            </div>
+          </div>
+        </section>
+
         <section class="view" id="profileView">
           <form class="editor" id="profileForm">
             <div class="profile-editor-head">
@@ -354,6 +402,52 @@
             <div class="top-actions">
               <button class="primary-button" type="submit">저장</button>
               <button class="danger-button" type="button" id="logoutButton">로그아웃</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="view" id="settingsView">
+          <form class="editor settings-editor" id="settingsForm">
+            <div class="section-title">
+              <div>
+                <h2>설정</h2>
+                <span class="subtle">화면, 채팅, 게시판 사용 방식을 조정합니다.</span>
+              </div>
+            </div>
+            <div class="settings-grid">
+              <label>테마
+                <select name="theme" id="settingTheme">
+                  <option value="system">시스템 설정</option>
+                  <option value="light">화이트 모드</option>
+                  <option value="dark">다크 모드</option>
+                </select>
+              </label>
+              <label>화면 밀도
+                <select name="density" id="settingDensity">
+                  <option value="comfortable">넓게 보기</option>
+                  <option value="compact">촘촘하게 보기</option>
+                </select>
+              </label>
+              <label>게시판 정렬
+                <select name="boardSort" id="settingBoardSort">
+                  <option value="newest">최신 글 먼저</option>
+                  <option value="oldest">오래된 글 먼저</option>
+                </select>
+              </label>
+              <label>채팅 표시
+                <select name="chatDisplay" id="settingChatDisplay">
+                  <option value="comfortable">말풍선형</option>
+                  <option value="compact">간단히 보기</option>
+                </select>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" name="autoScrollChat" id="settingAutoScroll" />
+                <span>새 채팅이 오면 자동으로 아래로 이동</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" name="soundCue" id="settingSoundCue" />
+                <span>새 채팅 알림 사운드</span>
+              </label>
             </div>
           </form>
         </section>
