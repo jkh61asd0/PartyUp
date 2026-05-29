@@ -1315,7 +1315,7 @@ function bindEvents() {
         nickname,
         gender: data.gender,
         age: data.age,
-        mainGame: data.mainGame,
+        mainGame: state.me.mainGame || initialState.me.mainGame,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -1335,7 +1335,7 @@ function bindEvents() {
       account.nickname = nickname;
       account.gender = data.gender;
       account.age = data.age;
-      account.mainGame = data.mainGame;
+      account.mainGame = account.mainGame || state.me.mainGame || initialState.me.mainGame;
       account.updatedAt = new Date().toISOString();
     }
     const accountNickname = account.nickname || nickname;
@@ -1349,7 +1349,7 @@ function bindEvents() {
     state.me.nickname = accountNickname;
     state.me.gender = account.gender || data.gender;
     state.me.age = account.age || data.age;
-    state.me.mainGame = account.mainGame || data.mainGame;
+    state.me.mainGame = account.mainGame || state.me.mainGame || initialState.me.mainGame;
     state.room.participants = [accountNickname];
     renderAll();
     showToast(`${accountNickname}님, 환영합니다.`);
@@ -1854,7 +1854,6 @@ function bindEvents() {
 
 fillGameSelect($("#filterGame"), true);
 fillGameSelect($("#createGame"));
-fillGameSelect($("#loginGame"));
 fillGameSelect($("#profileGame"));
 bindEvents();
 renderAll();
