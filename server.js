@@ -19,7 +19,7 @@ const MIME_TYPES = {
 };
 
 function defaultData() {
-  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
+  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [], userAccounts: [] };
 }
 
 function readDatabase() {
@@ -40,7 +40,8 @@ function readDatabase() {
       boardPosts: Array.isArray(data.boardPosts) ? data.boardPosts : [],
       lobbyMessages: Array.isArray(data.lobbyMessages) ? data.lobbyMessages : [],
       reports: Array.isArray(data.reports) ? data.reports : [],
-      bans: Array.isArray(data.bans) ? data.bans : []
+      bans: Array.isArray(data.bans) ? data.bans : [],
+      userAccounts: Array.isArray(data.userAccounts) ? data.userAccounts : []
     };
   } catch {
     return defaultData();
@@ -119,6 +120,19 @@ function mergeById(current = [], incoming = []) {
   return [...merged.values()];
 }
 
+function mergeUserAccounts(current = [], incoming = []) {
+  const merged = new Map();
+  current.forEach((account) => {
+    if (account?.loginId) merged.set(String(account.loginId).trim().toLowerCase(), account);
+  });
+  incoming.forEach((account) => {
+    if (!account?.loginId) return;
+    const loginId = String(account.loginId).trim().toLowerCase();
+    merged.set(loginId, { ...(merged.get(loginId) || {}), ...account, loginId });
+  });
+  return [...merged.values()];
+}
+
 function mergeRecruits(current = [], incoming = [], deletedRecruitIds = []) {
   const merged = new Map();
   current.forEach((recruit) => {
@@ -169,7 +183,8 @@ function normalizeInput(input = {}) {
     boardPosts: Array.isArray(input.boardPosts) ? input.boardPosts : [],
     lobbyMessages: Array.isArray(input.lobbyMessages) ? input.lobbyMessages : [],
     reports: Array.isArray(input.reports) ? input.reports : [],
-    bans: Array.isArray(input.bans) ? input.bans : []
+    bans: Array.isArray(input.bans) ? input.bans : [],
+    userAccounts: Array.isArray(input.userAccounts) ? input.userAccounts : []
   };
 }
 
@@ -198,7 +213,8 @@ function mergeState(current, incoming = {}) {
       : current.boardPosts.filter((post) => !deletedBoardPostIds.includes(post.id)).map((post) => ({ ...post, messages: (post.messages || []).filter((message) => !deletedCommentIds.includes(message.id)) })),
     lobbyMessages: mergeMessages(current.lobbyMessages, normalizedIncoming.lobbyMessages),
     reports: mergeById(current.reports, normalizedIncoming.reports).filter((report) => !deletedReportIds.includes(report.id)),
-    bans: mergeById(current.bans, normalizedIncoming.bans).filter((ban) => !deletedBanIds.includes(ban.id))
+    bans: mergeById(current.bans, normalizedIncoming.bans).filter((ban) => !deletedBanIds.includes(ban.id)),
+    userAccounts: mergeUserAccounts(current.userAccounts, normalizedIncoming.userAccounts)
   };
 }
 

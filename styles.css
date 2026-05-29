@@ -437,6 +437,8 @@ textarea {
 
 .login-card {
   width: min(440px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
   display: grid;
   gap: 18px;
   padding: 24px;

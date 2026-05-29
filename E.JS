@@ -18,6 +18,7 @@ const games = ["리그 오브 레전드", "발로란트", "오버워치 2", "배
 const initialState = {
   isLoggedIn: false,
   isAdmin: false,
+  currentAccountId: "",
   settings: {
     theme: "system",
     density: "comfortable",
@@ -45,6 +46,7 @@ const initialState = {
   blocked: [],
   reports: [],
   bans: [],
+  userAccounts: [],
   recruits: [],
   rooms: {},
   deletedRecruitIds: [],
@@ -120,7 +122,8 @@ function sharedStatePayload() {
     boardPosts: state.boardPosts,
     lobbyMessages: state.lobbyMessages,
     reports: state.reports,
-    bans: state.bans
+    bans: state.bans,
+    userAccounts: state.userAccounts
   };
 }
 
@@ -142,10 +145,12 @@ function applySharedState(data) {
   if (Array.isArray(data.lobbyMessages)) state.lobbyMessages = data.lobbyMessages;
   if (Array.isArray(data.reports)) state.reports = data.reports;
   if (Array.isArray(data.bans)) state.bans = data.bans;
+  if (Array.isArray(data.userAccounts)) state.userAccounts = data.userAccounts;
   normalizeBoardPosts();
   normalizeLobbyMessages();
   normalizeFriendData();
   normalizeAdminData();
+  normalizeUserAccounts();
   syncCurrentRoomFromShared();
   const nextLobbyMessage = state.lobbyMessages.at(-1);
   if (sharedStateLoaded && currentSettings().soundCue && nextLobbyMessage?.id !== previousLobbyId && nextLobbyMessage?.from !== displayName()) {
@@ -362,6 +367,54 @@ function currentSettings() {
 
 function friendPairKey(a, b) {
   return [a, b].map((name) => String(name || "").trim()).sort((left, right) => left.localeCompare(right, "ko-KR")).join("::");
+}
+
+function normalizeLoginId(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function passwordHash(loginId, password) {
+  const text = `${normalizeLoginId(loginId)}:${String(password || "")}`;
+  if (!crypto?.subtle) {
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `fnv-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  }
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeUserAccounts() {
+  state.userAccounts = Array.isArray(state.userAccounts) ? state.userAccounts : [];
+  state.userAccounts.forEach((account) => {
+    account.loginId = normalizeLoginId(account.loginId);
+    if (!account.id) account.id = `u${Date.now()}${Math.random().toString(16).slice(2)}`;
+    if (!account.createdAt) account.createdAt = new Date().toISOString();
+  });
+  const accountsByLoginId = new Map();
+  state.userAccounts.forEach((account) => {
+    if (account.loginId && !accountsByLoginId.has(account.loginId)) accountsByLoginId.set(account.loginId, account);
+  });
+  state.userAccounts = [...accountsByLoginId.values()];
+}
+
+function accountByLoginId(loginId) {
+  normalizeUserAccounts();
+  return state.userAccounts.find((account) => account.loginId === normalizeLoginId(loginId));
+}
+
+function currentAccount() {
+  normalizeUserAccounts();
+  return state.userAccounts.find((account) => account.id === state.currentAccountId);
+}
+
+function nicknameAccount(nickname) {
+  normalizeUserAccounts();
+  return state.userAccounts.find((account) => account.nickname === nickname);
 }
 
 function normalizeFriendData() {
@@ -923,6 +976,7 @@ function renderBubble(message) {
 
 function renderAll(syncShared = true) {
   applySettings();
+  normalizeUserAccounts();
   syncMyIdentity();
   $("#myNickname").textContent = displayName();
   $("#myStatus").textContent = state.me.status;
@@ -1234,22 +1288,71 @@ function bindEvents() {
   $("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const loginId = normalizeLoginId(data.loginId);
+    const password = String(data.password || "");
     const nickname = data.nickname.trim();
-    if (!nickname) return;
+    if (!loginId || !password || !nickname) return;
     await waitForSharedLoad();
     await loadSharedState(true);
     await waitForSharedLoad();
-    const ban = activeBanFor(nickname);
+    normalizeUserAccounts();
+    const hash = await passwordHash(loginId, password);
+    let account = accountByLoginId(loginId);
+    if (account && account.passwordHash !== hash) {
+      showToast("ID 또는 비밀번호가 맞지 않습니다.");
+      return;
+    }
+    if (!account) {
+      const ownerOfNickname = nicknameAccount(nickname);
+      if (ownerOfNickname) {
+        showToast("이미 사용 중인 닉네임입니다.");
+        return;
+      }
+      account = {
+        id: `u${Date.now()}${Math.random().toString(16).slice(2)}`,
+        loginId,
+        passwordHash: hash,
+        nickname,
+        gender: data.gender,
+        age: data.age,
+        mainGame: data.mainGame,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      state.userAccounts.unshift(account);
+    } else {
+      const ownerOfNickname = nicknameAccount(nickname);
+      if (ownerOfNickname && ownerOfNickname.id !== account.id) {
+        showToast("이미 사용 중인 닉네임입니다.");
+        return;
+      }
+      const previousNickname = account.nickname;
+      const previousBan = activeBanFor(previousNickname);
+      if (previousBan) {
+        showToast(banMessage(previousBan));
+        return;
+      }
+      account.nickname = nickname;
+      account.gender = data.gender;
+      account.age = data.age;
+      account.mainGame = data.mainGame;
+      account.updatedAt = new Date().toISOString();
+    }
+    const accountNickname = account.nickname || nickname;
+    const ban = activeBanFor(accountNickname);
     if (ban) {
       showToast(banMessage(ban));
       return;
     }
     state.isLoggedIn = true;
-    state.me.nickname = nickname;
-    state.me.mainGame = data.mainGame;
-    state.room.participants = [nickname];
+    state.currentAccountId = account.id;
+    state.me.nickname = accountNickname;
+    state.me.gender = account.gender || data.gender;
+    state.me.age = account.age || data.age;
+    state.me.mainGame = account.mainGame || data.mainGame;
+    state.room.participants = [accountNickname];
     renderAll();
-    showToast(`${nickname}님, 환영합니다.`);
+    showToast(`${accountNickname}님, 환영합니다.`);
   });
 
   $("#profileForm").addEventListener("submit", async (event) => {
@@ -1261,6 +1364,11 @@ function bindEvents() {
     await waitForSharedLoad();
     await loadSharedState(true);
     await waitForSharedLoad();
+    const ownerOfNickname = nicknameAccount(nextName);
+    if (ownerOfNickname && ownerOfNickname.id !== state.currentAccountId) {
+      showToast("이미 사용 중인 닉네임입니다.");
+      return;
+    }
     const ban = activeBanFor(nextName);
     if (ban) {
       showToast(banMessage(ban));
@@ -1318,6 +1426,14 @@ function bindEvents() {
         if (message.from === beforeName) message.from = nextName;
       });
     });
+    const account = currentAccount();
+    if (account) {
+      account.nickname = nextName;
+      account.gender = data.gender;
+      account.age = data.age;
+      account.mainGame = data.mainGame;
+      account.updatedAt = new Date().toISOString();
+    }
     renderAll();
     showToast("프로필을 저장했습니다.");
   });
@@ -1342,6 +1458,7 @@ function bindEvents() {
     if (!confirm("로그아웃할까요? 브라우저에 저장된 글과 기록은 유지됩니다.")) return;
     state.isLoggedIn = false;
     state.isAdmin = false;
+    state.currentAccountId = "";
     renderAll();
     showToast("로그아웃했습니다.");
   });

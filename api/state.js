@@ -2,7 +2,7 @@ const APP_STATE_ID = "partyup";
 const REDIS_KEY = "partyup:state";
 
 function defaultData() {
-  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
+  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], deletedBoardPostIds: [], deletedCommentIds: [], deletedReportIds: [], deletedBanIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [], userAccounts: [] };
 }
 
 function normalizeData(input = {}) {
@@ -21,7 +21,8 @@ function normalizeData(input = {}) {
     boardPosts: Array.isArray(input.boardPosts) ? input.boardPosts : [],
     lobbyMessages: Array.isArray(input.lobbyMessages) ? input.lobbyMessages : [],
     reports: Array.isArray(input.reports) ? input.reports : [],
-    bans: Array.isArray(input.bans) ? input.bans : []
+    bans: Array.isArray(input.bans) ? input.bans : [],
+    userAccounts: Array.isArray(input.userAccounts) ? input.userAccounts : []
   };
 }
 
@@ -97,6 +98,19 @@ function mergeById(current = [], incoming = []) {
   return [...merged.values()];
 }
 
+function mergeUserAccounts(current = [], incoming = []) {
+  const merged = new Map();
+  current.forEach((account) => {
+    if (account?.loginId) merged.set(String(account.loginId).trim().toLowerCase(), account);
+  });
+  incoming.forEach((account) => {
+    if (!account?.loginId) return;
+    const loginId = String(account.loginId).trim().toLowerCase();
+    merged.set(loginId, { ...(merged.get(loginId) || {}), ...account, loginId });
+  });
+  return [...merged.values()];
+}
+
 function mergeRecruits(current = [], incoming = [], deletedRecruitIds = []) {
   const merged = new Map();
   current.forEach((recruit) => {
@@ -158,7 +172,8 @@ function mergeState(currentInput = {}, incomingInput = {}) {
       : current.boardPosts.filter((post) => !deletedBoardPostIds.includes(post.id)).map((post) => ({ ...post, messages: (post.messages || []).filter((message) => !deletedCommentIds.includes(message.id)) })),
     lobbyMessages: mergeMessages(current.lobbyMessages, normalizedIncoming.lobbyMessages),
     reports: mergeById(current.reports, normalizedIncoming.reports).filter((report) => !deletedReportIds.includes(report.id)),
-    bans: mergeById(current.bans, normalizedIncoming.bans).filter((ban) => !deletedBanIds.includes(ban.id))
+    bans: mergeById(current.bans, normalizedIncoming.bans).filter((ban) => !deletedBanIds.includes(ban.id)),
+    userAccounts: mergeUserAccounts(current.userAccounts, normalizedIncoming.userAccounts)
   };
 }
 
