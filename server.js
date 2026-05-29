@@ -19,7 +19,7 @@ const MIME_TYPES = {
 };
 
 function defaultData() {
-  return { recruits: [], rooms: {}, friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
+  return { recruits: [], rooms: {}, deletedRecruitIds: [], deletedRoomIds: [], friendRequests: [], friendships: [], directMessages: {}, boardPosts: [], lobbyMessages: [], reports: [], bans: [] };
 }
 
 function readDatabase() {
@@ -28,6 +28,8 @@ function readDatabase() {
     return {
       recruits: Array.isArray(data.recruits) ? data.recruits : [],
       rooms: data.rooms && typeof data.rooms === "object" && !Array.isArray(data.rooms) ? data.rooms : {},
+      deletedRecruitIds: Array.isArray(data.deletedRecruitIds) ? data.deletedRecruitIds : [],
+      deletedRoomIds: Array.isArray(data.deletedRoomIds) ? data.deletedRoomIds : [],
       friendRequests: Array.isArray(data.friendRequests) ? data.friendRequests : [],
       friendships: Array.isArray(data.friendships) ? data.friendships : [],
       directMessages: data.directMessages && typeof data.directMessages === "object" && !Array.isArray(data.directMessages) ? data.directMessages : {},
@@ -55,9 +57,11 @@ function mergeMessages(current = [], incoming = []) {
     .slice(-300);
 }
 
-function mergeRooms(currentRooms = {}, incomingRooms = {}) {
+function mergeRooms(currentRooms = {}, incomingRooms = {}, deletedRoomIds = []) {
   const rooms = { ...currentRooms };
+  deletedRoomIds.forEach((roomId) => delete rooms[roomId]);
   Object.entries(incomingRooms || {}).forEach(([roomId, incomingRoom]) => {
+    if (deletedRoomIds.includes(roomId)) return;
     const currentRoom = rooms[roomId] || {};
     const kicked = [...new Set([...(currentRoom.kicked || []), ...(incomingRoom.kicked || [])])];
     const participants = [...new Set([...(currentRoom.participants || []), ...(incomingRoom.participants || [])])].filter((nickname) => !kicked.includes(nickname));
@@ -91,13 +95,13 @@ function mergeById(current = [], incoming = []) {
   return [...merged.values()];
 }
 
-function mergeRecruits(current = [], incoming = []) {
+function mergeRecruits(current = [], incoming = [], deletedRecruitIds = []) {
   const merged = new Map();
   current.forEach((recruit) => {
-    if (recruit?.id) merged.set(recruit.id, recruit);
+    if (recruit?.id && !deletedRecruitIds.includes(recruit.id)) merged.set(recruit.id, recruit);
   });
   incoming.forEach((recruit) => {
-    if (!recruit?.id) return;
+    if (!recruit?.id || deletedRecruitIds.includes(recruit.id)) return;
     const previous = merged.get(recruit.id) || {};
     merged.set(recruit.id, {
       ...previous,
@@ -112,6 +116,8 @@ function normalizeInput(input = {}) {
   return {
     recruits: Array.isArray(input.recruits) ? input.recruits : [],
     rooms: input.rooms && typeof input.rooms === "object" && !Array.isArray(input.rooms) ? input.rooms : {},
+    deletedRecruitIds: Array.isArray(input.deletedRecruitIds) ? input.deletedRecruitIds : [],
+    deletedRoomIds: Array.isArray(input.deletedRoomIds) ? input.deletedRoomIds : [],
     friendRequests: Array.isArray(input.friendRequests) ? input.friendRequests : [],
     friendships: Array.isArray(input.friendships) ? input.friendships : [],
     directMessages: input.directMessages && typeof input.directMessages === "object" && !Array.isArray(input.directMessages) ? input.directMessages : {},
@@ -124,9 +130,13 @@ function normalizeInput(input = {}) {
 
 function mergeState(current, incoming = {}) {
   const normalizedIncoming = normalizeInput(incoming);
+  const deletedRecruitIds = [...new Set([...(current.deletedRecruitIds || []), ...normalizedIncoming.deletedRecruitIds])];
+  const deletedRoomIds = [...new Set([...(current.deletedRoomIds || []), ...normalizedIncoming.deletedRoomIds])];
   return {
-    recruits: Object.prototype.hasOwnProperty.call(incoming, "recruits") ? mergeRecruits(current.recruits, normalizedIncoming.recruits) : current.recruits,
-    rooms: mergeRooms(current.rooms, normalizedIncoming.rooms),
+    recruits: Object.prototype.hasOwnProperty.call(incoming, "recruits") ? mergeRecruits(current.recruits, normalizedIncoming.recruits, deletedRecruitIds) : current.recruits.filter((recruit) => !deletedRecruitIds.includes(recruit.id)),
+    rooms: mergeRooms(current.rooms, normalizedIncoming.rooms, deletedRoomIds),
+    deletedRecruitIds,
+    deletedRoomIds,
     friendRequests: mergeById(current.friendRequests, normalizedIncoming.friendRequests),
     friendships: mergeById(current.friendships, normalizedIncoming.friendships),
     directMessages: mergeObjectMessageLists(current.directMessages, normalizedIncoming.directMessages),

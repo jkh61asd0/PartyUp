@@ -47,6 +47,8 @@ const initialState = {
   bans: [],
   recruits: [],
   rooms: {},
+  deletedRecruitIds: [],
+  deletedRoomIds: [],
   friendRequests: [],
   friendships: [],
   directMessages: {},
@@ -97,6 +99,8 @@ function sharedStatePayload() {
   return {
     recruits: state.recruits,
     rooms: state.rooms,
+    deletedRecruitIds: state.deletedRecruitIds,
+    deletedRoomIds: state.deletedRoomIds,
     friendRequests: state.friendRequests,
     friendships: state.friendships,
     directMessages: state.directMessages,
@@ -112,6 +116,8 @@ function applySharedState(data) {
   const previousLobbyId = state.lobbyMessages.at(-1)?.id || "";
   if (Array.isArray(data.recruits)) state.recruits = data.recruits;
   state.rooms = data.rooms && typeof data.rooms === "object" && !Array.isArray(data.rooms) ? data.rooms : {};
+  if (Array.isArray(data.deletedRecruitIds)) state.deletedRecruitIds = data.deletedRecruitIds;
+  if (Array.isArray(data.deletedRoomIds)) state.deletedRoomIds = data.deletedRoomIds;
   if (Array.isArray(data.friendRequests)) state.friendRequests = data.friendRequests;
   if (Array.isArray(data.friendships)) state.friendships = data.friendships;
   state.directMessages = data.directMessages && typeof data.directMessages === "object" && !Array.isArray(data.directMessages) ? data.directMessages : {};
@@ -147,6 +153,8 @@ function normalizeRoom(room = {}) {
 
 function syncCurrentRoomFromShared() {
   state.rooms = state.rooms && typeof state.rooms === "object" && !Array.isArray(state.rooms) ? state.rooms : {};
+  state.deletedRecruitIds = Array.isArray(state.deletedRecruitIds) ? state.deletedRecruitIds : [];
+  state.deletedRoomIds = Array.isArray(state.deletedRoomIds) ? state.deletedRoomIds : [];
   if (!state.currentRoomId) return;
   const sharedRoom = state.rooms[state.currentRoomId];
   const recruit = state.recruits.find((item) => item.id === state.currentRoomId);
@@ -991,6 +999,8 @@ function deleteRecruitRoom(recruitId) {
   if (!confirm("이 방을 삭제할까요? 모집글과 현재 방 정보가 함께 삭제됩니다.")) return;
   state.recruits = state.recruits.filter((item) => item.id !== recruitId);
   if (state.rooms) delete state.rooms[recruitId];
+  state.deletedRecruitIds = [...new Set([...(state.deletedRecruitIds || []), recruitId])];
+  state.deletedRoomIds = [...new Set([...(state.deletedRoomIds || []), recruitId])];
   if (state.currentRoomId === recruitId) {
     state.currentRoomId = "";
     state.room = blankRoom();
